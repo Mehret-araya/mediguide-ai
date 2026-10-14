@@ -1,0 +1,35 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# JavaScript and Node.js
+node_modules/
+dist/
+build/
+coverage/
+npm-debug.log*
+
+# Expo mobile application
+.expo/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Code editors
+.vscode/
+.idea/
