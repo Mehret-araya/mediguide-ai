@@ -4,8 +4,8 @@ import request from "supertest";
 import app from "./app.js";
 
 describe("MediGuide AI API", () => {
-  it("returns a healthy status from GET /api/health", async () => {
-    const response = await request(app).get("/api/health");
+  it("returns a healthy status from GET /health", async () => {
+    const response = await request(app).get("/health");
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
@@ -15,21 +15,28 @@ describe("MediGuide AI API", () => {
     });
   });
 
-  it("returns the available education topics", async () => {
-    const response = await request(app).get("/api/education");
+  it("returns 404 for the old health endpoint", async () => {
+    const response = await request(app).get("/api/health");
+
+    expect(response.status).toBe(404);
+  });
+
+  it("returns the available education topics from the versioned API", async () => {
+    const response = await request(app).get("/api/v1/education");
 
     expect(response.status).toBe(200);
     expect(response.body.status).toBe("ok");
     expect(response.body.topics).toHaveLength(2);
-    expect(response.body.topics.map((topic: { id: string }) => topic.id)).toEqual([
-      "hydration",
-      "hand-hygiene",
-    ]);
+    expect(
+      response.body.topics.map((topic: { id: string }) => topic.id),
+    ).toEqual(["hydration", "hand-hygiene"]);
     expect(response.body.disclaimer).toContain("not been clinically reviewed");
   });
 
   it("returns the hydration topic by ID", async () => {
-    const response = await request(app).get("/api/education/hydration");
+    const response = await request(app).get(
+      "/api/v1/education/hydration",
+    );
 
     expect(response.status).toBe(200);
     expect(response.body.topic.id).toBe("hydration");
@@ -37,7 +44,7 @@ describe("MediGuide AI API", () => {
 
   it("returns 404 when an education topic does not exist", async () => {
     const response = await request(app).get(
-      "/api/education/unknown-topic",
+      "/api/v1/education/unknown-topic",
     );
 
     expect(response.status).toBe(404);
@@ -47,8 +54,14 @@ describe("MediGuide AI API", () => {
     });
   });
 
+  it("returns 404 for the old education endpoint", async () => {
+    const response = await request(app).get("/api/education");
+
+    expect(response.status).toBe(404);
+  });
+
   it("returns 404 for an unknown API route", async () => {
-    const response = await request(app).get("/api/does-not-exist");
+    const response = await request(app).get("/api/v1/does-not-exist");
 
     expect(response.status).toBe(404);
     expect(response.body).toEqual({
@@ -59,7 +72,7 @@ describe("MediGuide AI API", () => {
 
   it("rejects malformed JSON with status 400", async () => {
     const response = await request(app)
-      .post("/api/education")
+      .post("/api/v1/education")
       .set("Content-Type", "application/json")
       .send('{"broken":');
 
@@ -72,7 +85,7 @@ describe("MediGuide AI API", () => {
 
   it("blocks requests from unapproved origins", async () => {
     const response = await request(app)
-      .get("/api/health")
+      .get("/health")
       .set("Origin", "http://evil.example");
 
     expect(response.status).toBe(403);
@@ -83,7 +96,7 @@ describe("MediGuide AI API", () => {
   });
 
   it("includes the Helmet security header", async () => {
-    const response = await request(app).get("/api/health");
+    const response = await request(app).get("/health");
 
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
   });

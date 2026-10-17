@@ -37,11 +37,11 @@ app.use(
 
 app.use(express.json({ limit: "10kb" }));
 
-// General health education endpoints.
-app.use("/api/education", educationRouter);
+// Versioned general health education endpoints.
+app.use("/api/v1/education", educationRouter);
 
-// Health endpoint: confirms that the backend is running.
-app.get("/api/health", (_req: Request, res: Response) => {
+// Process health check. This does not verify dependency readiness.
+app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({
     status: "ok",
     service: "MediGuide AI backend",

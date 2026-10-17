@@ -1,3 +1,4 @@
+
 export type BackendHealth = {
   status: string
   service: string
@@ -5,7 +6,7 @@ export type BackendHealth = {
 }
 
 export async function checkBackendHealth(): Promise<BackendHealth> {
-  const response = await fetch('/api/health')
+  const response = await fetch('/health')
 
   if (!response.ok) {
     throw new Error(`Backend health check failed (${response.status})`)
@@ -13,6 +14,7 @@ export async function checkBackendHealth(): Promise<BackendHealth> {
 
   return (await response.json()) as BackendHealth
 }
+
 export type EducationTopic = {
   id: string
   title: string
@@ -28,9 +30,9 @@ export type EducationResponse = {
   topics: EducationTopic[]
 }
 
-// Retrieve general health education topics from the backend.
+// Retrieve general health education topics from the versioned API.
 export async function getEducationTopics(): Promise<EducationResponse> {
-  const response = await fetch('/api/education')
+ const response = await fetch('/api/v1/education')
 
   if (!response.ok) {
     throw new Error(`Failed to load education topics (${response.status})`)
