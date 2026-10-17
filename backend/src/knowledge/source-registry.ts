@@ -31,6 +31,14 @@ export interface HealthSourceRecord {
   version?: string;
   checksum?: string;
 }
+export interface ReviewAuditEvent {
+  sourceId: string;
+  fromStatus: SourceReviewStatus;
+  toStatus: SourceReviewStatus;
+  reviewer: string;
+  reviewedAt: string;
+  reason: string;
+}
 
 function isObject(
   value: unknown,
@@ -198,10 +206,28 @@ export function validateSourceRecord(
  */
 export function isEligibleForRetrieval(
   record: unknown,
+  auditHistory: readonly ReviewAuditEvent[] = [],
 ): record is HealthSourceRecord {
+  if (
+    !isObject(record) ||
+    record.reviewStatus !== "approved" ||
+    validateSourceRecord(record).length !== 0
+  ) {
+    return false;
+  }
+
+  const sourceEvents = auditHistory.filter(
+    (event) => event.sourceId === record.id,
+  );
+
+  const latestEvent = sourceEvents[sourceEvents.length - 1];
+
   return (
-    isObject(record) &&
-    record.reviewStatus === "approved" &&
-    validateSourceRecord(record).length === 0
+    latestEvent !== undefined &&
+    latestEvent.toStatus === "approved" &&
+    latestEvent.fromStatus === "pending_review" &&
+    isNonEmptyString(latestEvent.reviewer) &&
+    isValidDate(latestEvent.reviewedAt) &&
+    isNonEmptyString(latestEvent.reason)
   );
 }

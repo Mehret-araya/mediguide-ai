@@ -76,18 +76,17 @@ describe("Health source registry", () => {
     expect(isEligibleForRetrieval(pendingSource)).toBe(false);
   });
 
-  it("allows a structurally valid approved record to pass the eligibility check", () => {
-    const approvedSource: HealthSourceRecord = {
-      ...pendingSource,
-      reviewStatus: "approved",
-      reviewer: "Test Reviewer",
-      reviewedAt: "2026-10-17",
-    };
+  it("does not allow an approved record without an approval audit event", () => {
+  const approvedSource: HealthSourceRecord = {
+    ...pendingSource,
+    reviewStatus: "approved",
+    reviewer: "Test Reviewer",
+    reviewedAt: "2026-10-17",
+  };
 
-    expect(validateSourceRecord(approvedSource)).toEqual([]);
-    expect(isEligibleForRetrieval(approvedSource)).toBe(true);
-  });
-
+  expect(validateSourceRecord(approvedSource)).toEqual([]);
+  expect(isEligibleForRetrieval(approvedSource)).toBe(false);
+});
   it("rejects approved records with incomplete metadata", () => {
     const invalidApprovedSource = {
       ...pendingSource,
