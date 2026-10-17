@@ -1,5 +1,6 @@
-
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getEducationTopics } from './api'
+import type { EducationTopic } from './api'
 import './App.css'
 
 type Language = 'English' | 'አማርኛ'
@@ -76,6 +77,11 @@ const content = {
     unavailableDescription:
       'The website interface is under development. No AI health assessment or personalized medical guidance is available yet.',
     close: 'Close',
+    retry: 'Try again',
+    loadingTopics: 'Loading health education topics...',
+    topicsError:
+      'Health education topics could not be loaded. Please check your connection and try again.',
+    emptyTopics: 'No health education topics are available right now.',
   },
   'አማርኛ': {
     caption: 'የጤና ትምህርት በቀላሉ',
@@ -142,12 +148,51 @@ const content = {
     unavailableDescription:
       'የድረ-ገጹ ክፍል እየተዘጋጀ ነው። የAI የጤና ግምገማ ወይም የግል የሕክምና መመሪያ እስካሁን አይገኝም።',
     close: 'ዝጋ',
+    retry: 'እንደገና ይሞክሩ',
+    loadingTopics: 'የጤና ትምህርት ርዕሶች በመጫን ላይ ናቸው...',
+    topicsError: 'የጤና ርዕሶችን መጫን አልተቻለም። የኢንተርኔት ግንኙነትዎን ይፈትሹና እንደገና ይሞክሩ።',
+    emptyTopics: 'በአሁኑ ጊዜ የጤና ትምህርት ርዕሶች የሉም።',
   },
 } as const
 
 function App() {
   const [language, setLanguage] = useState<Language>('English')
   const [showNotice, setShowNotice] = useState(false)
+  const [educationTopics, setEducationTopics] = useState<EducationTopic[]>([])
+  const [educationDisclaimer, setEducationDisclaimer] = useState('')
+  const [topicsLoading, setTopicsLoading] = useState(true)
+  const [topicsError, setTopicsError] = useState(false)
+  const [topicsRetryCount, setTopicsRetryCount] = useState(0)
+
+  useEffect(() => {
+    let active = true
+
+    setTopicsLoading(true)
+    setTopicsError(false)
+
+    getEducationTopics()
+      .then((data) => {
+        if (active) {
+          setEducationTopics(data.topics)
+          setEducationDisclaimer(data.disclaimer)
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setTopicsError(true)
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setTopicsLoading(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [topicsRetryCount])
+
   const text = content[language]
 
   const scrollToTopics = () => {
@@ -273,23 +318,37 @@ function App() {
             </div>
 
             <div className="topic-grid">
-              {text.topics.map((topic) => (
-                <article className="topic-card" key={topic.title}>
-                  <span className="feature-icon" aria-hidden="true">
-                    {topic.icon}
-                  </span>
-                  <h3>{topic.title}</h3>
-                  <p>{topic.description}</p>
+              {topicsLoading ? (
+                <p role="status">{text.loadingTopics}</p>
+              ) : topicsError ? (
+                <div role="alert">
+                  <p>{text.topicsError}</p>
                   <button
-                    className="topic-link"
+                    className="button button-primary"
                     type="button"
-                    onClick={() => setShowNotice(true)}
+                    onClick={() => setTopicsRetryCount((count) => count + 1)}
                   >
-                    {text.primaryAction} <span aria-hidden="true">→</span>
+                    {text.retry}
                   </button>
-                </article>
-              ))}
+                </div>
+              ) : educationTopics.length === 0 ? (
+                <p>{text.emptyTopics}</p>
+              ) : (
+                educationTopics.map((topic) => (
+                  <article className="topic-card" key={topic.id}>
+                    <h3>{topic.title}</h3>
+                    <p>{topic.summary}</p>
+                    <p>{topic.guidance}</p>
+                  </article>
+                ))
+              )}
             </div>
+
+            {!topicsLoading && !topicsError && educationDisclaimer && (
+              <p className="topic-disclaimer" role="note">
+                {educationDisclaimer}
+              </p>
+            )}
           </div>
         </section>
 
