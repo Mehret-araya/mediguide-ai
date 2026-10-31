@@ -1,7 +1,23 @@
 import httpx
 import pytest
 
-from app.main import app
+from app.core.config import Settings
+from app.main import app, create_app
+
+
+def test_app_metadata_uses_centralized_settings() -> None:
+    configured_app = create_app(
+        Settings(
+            app_name="Configured MediGuide Service",
+            app_version="2.3.4",
+            app_env="testing",
+            debug=True,
+        )
+    )
+
+    assert configured_app.title == "Configured MediGuide Service"
+    assert configured_app.version == "2.3.4"
+    assert configured_app.debug is True
 
 
 @pytest.mark.anyio
