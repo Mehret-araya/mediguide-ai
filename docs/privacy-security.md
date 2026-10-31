@@ -115,6 +115,8 @@ refresh, logout, identity lookup, and account deletion to Supabase Auth. The
 service-role key is used only server-side for account deletion; passwords and
 provider error details are not logged or returned. Automated tests use mocked
 provider responses, and no live Supabase Auth configuration was available for
-integration testing. The frontend is not yet connected, browser token storage
-is not implemented, conversation data does not yet exist, and deployment
-rate-limiting and security controls still require review.
+integration testing. The frontend sends credentialed requests and does not
+access session tokens from JavaScript; production deployment must use HTTPS
+and same-site frontend/API origins for `SameSite=Lax` cookies. Conversation
+data does not yet exist, and deployment rate-limiting and security controls
+still require review.

@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react'
+import { AuthDialog } from './auth/AuthDialog'
+import { useAuth } from './auth/auth-context'
 import './App.css'
 
 type IconName =
@@ -182,8 +184,10 @@ const navigation = [
 ]
 
 function App() {
+  const { status, user } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [authOpen, setAuthOpen] = useState(false)
   const [question, setQuestion] = useState('')
   const [assistantNotice, setAssistantNotice] = useState('')
   const [facilitySearch, setFacilitySearch] = useState('')
@@ -253,6 +257,17 @@ function App() {
             <a className="nav-cta" href="#assistant" onClick={closeMenu}>
               Get started <Icon name="arrow" size={17} />
             </a>
+            <button
+              className="nav-cta auth-trigger"
+              type="button"
+              onClick={() => {
+                closeMenu()
+                setAuthOpen(true)
+              }}
+              disabled={status === 'loading'}
+            >
+              {status === 'authenticated' ? user?.email ?? 'Account' : 'Sign in'}
+            </button>
           </nav>
         </div>
       </header>
@@ -578,6 +593,7 @@ function App() {
           </section>
         </div>
       )}
+      {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} />}
     </div>
   )
 }

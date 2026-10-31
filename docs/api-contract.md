@@ -122,6 +122,12 @@ service-role key is required only for account deletion and must never be
 exposed to the client. Deploy the frontend and API on the same site so the
 `SameSite=Lax` cookies are included in browser requests.
 
+The React frontend calls these routes with `credentials: "include"` and uses
+`VITE_API_URL` to select the Express API origin. The sign-in, registration,
+session restoration, logout, and account deletion UI is implemented. No
+conversation or history route is currently protected because persistent
+history endpoints do not exist yet.
+
 Authentication errors currently use `{ "status": "error", "code": "...",
 "message": "..." }`. The API-wide standard error envelope remains future work.
 

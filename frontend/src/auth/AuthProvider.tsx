@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -11,44 +12,30 @@ import {
   type AuthContextValue,
   type AuthStatus,
 } from './auth-context'
-let restoreSessionPromise: Promise<AuthUser | null> | null = null
 
 function isUnauthorized(error: unknown): boolean {
   return error instanceof AuthApiError && error.statusCode === 401
 }
 
 function restoreSession(): Promise<AuthUser | null> {
-  if (!restoreSessionPromise) {
-    restoreSessionPromise = (async () => {
-      try {
-        return await authApi.me()
-      } catch (error) {
-        if (!isUnauthorized(error)) {
-          throw error
-        }
-      }
-
-      try {
-        return await authApi.refresh()
-      } catch (error) {
-        if (isUnauthorized(error)) {
-          return null
-        }
+  return (async () => {
+    try {
+      return await authApi.me()
+    } catch (error) {
+      if (!isUnauthorized(error)) {
         throw error
       }
-    })()
+    }
 
-    void restoreSessionPromise.then(
-      () => {
-        restoreSessionPromise = null
-      },
-      () => {
-        restoreSessionPromise = null
-      },
-    )
-  }
-
-  return restoreSessionPromise
+    try {
+      return await authApi.refresh()
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        return null
+      }
+      throw error
+    }
+  })()
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -57,11 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const restorePromise = useRef<Promise<AuthUser | null> | null>(null)
 
   useEffect(() => {
     let active = true
+    restorePromise.current ??= restoreSession()
 
-    void restoreSession()
+    void restorePromise.current
       .then((restoredUser) => {
         if (!active) return
         setUser(restoredUser)

@@ -63,10 +63,10 @@ MediGuide AI is not clinically validated and is not a substitute for professiona
 The repository includes an Express backend with Supabase Auth registration,
 login, token refresh, logout, current-user lookup, and authenticated account
 deletion routes. It also includes PostgreSQL connection configuration, a
-source-review foundation, a responsive offline website, and a FastAPI
-AI-service health endpoint. RAG answers, database migrations, conversation
-history, verified facility data, and clinically reviewed emergency rules are
-not yet implemented.
+source-review foundation, a responsive website with Supabase Auth flows, and
+a FastAPI AI-service health endpoint. RAG answers, database migrations,
+conversation history, verified facility data, and clinically reviewed
+emergency rules are not yet implemented.
 
 ### Backend authentication setup
 
@@ -79,14 +79,16 @@ does not depend on the PostgreSQL TLS certificate configuration.
 
 The backend exposes `/api/v1/auth/register`, `/login`, `/refresh`, `/logout`,
 `/me`, and `DELETE /api/v1/auth/account`. Authenticated requests use a bearer
-access token. Login and refresh responses contain short-lived access and
-rotating refresh tokens; clients must protect them and must not store them in
-browser local storage. The website has not yet been connected to these routes.
+access token for non-browser clients. The website is connected through
+credentialed requests and the backend's HttpOnly access/refresh cookies; token
+values are not exposed to browser JavaScript or stored in local storage.
 Account deletion currently removes only the Supabase Auth identity because
 conversation and application records are not yet persisted.
 
-Run the web frontend from `frontend/` with `npm run dev`. The current website
-is an offline prototype and does not yet call the backend.
+Copy `frontend/.env.example` to `frontend/.env` to override `VITE_API_URL`.
+Deploy the frontend and API on the same site so the `SameSite=Lax` session
+cookies are sent by the browser. The frontend configuration must never contain
+Supabase keys. Run the frontend from `frontend/` with `npm run dev`.
 
 ### Backend development configuration
 

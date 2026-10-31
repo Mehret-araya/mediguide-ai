@@ -134,8 +134,8 @@ Production secrets must never be committed to the repository.
 
 The following decisions require further documentation before production use or implementation:
 
-- Browser token storage and production session handling. The API currently
-  issues Supabase bearer access and refresh tokens.
+- Production session deployment. The API issues HttpOnly cookies for browser
+  clients and bearer access tokens for non-browser clients.
 - Database schema and retention policy.
 - Approved health-source selection and review process.
 - Citation format and integrity validation.
@@ -156,9 +156,9 @@ the current environment because the configured database presents an
 untrusted certificate chain (`SELF_SIGNED_CERT_IN_CHAIN`). The backend
 supports a trusted Supabase CA file through `DATABASE_SSL_CA`; certificate
 verification must not be disabled for the hosted database. Auth routes have
-automated mocked-provider tests, but no live Supabase Auth configuration was
-available for integration testing. The website is not yet connected to auth.
-Database migrations, conversation persistence, retrieval, answer generation,
-clinical safeguards, and production deployment remain unimplemented. This
-document does not mean that the services have been clinically validated or
-deployed.
+automated mocked-provider tests, and the website uses HttpOnly-cookie auth
+flows, but no live Supabase Auth configuration was available for integration
+testing. Database migrations, conversation persistence, retrieval, answer
+generation, clinical safeguards, and production deployment remain
+unimplemented. This document does not mean that the services have been
+clinically validated or deployed.
