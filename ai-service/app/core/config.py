@@ -22,3 +22,4 @@ class Settings(BaseSettings):
     )
     app_env: Literal["development", "testing", "production"] = "development"
     debug: bool = False
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
