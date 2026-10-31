@@ -23,7 +23,7 @@ This document describes planned safeguards. It does not mean those safeguards ha
 - Validate credentials and protect authentication endpoints against abuse.
 - Enforce authorization on the server for every private resource.
 - Do not rely on hiding interface elements as an access-control mechanism.
-- Use secure session or token handling appropriate to the mobile platform.
+- Use secure session or token handling appropriate to each client platform.
 
 ## 4. Conversation Privacy
 
@@ -44,7 +44,7 @@ This document describes planned safeguards. It does not mean those safeguards ha
 ## 6. Secrets Management
 
 - Never commit API keys, database passwords, signing secrets, or access tokens.
-- Keep server credentials out of mobile application code.
+- Keep server credentials out of client-side application code.
 - Use environment configuration during development and a suitable secret-management mechanism in production.
 - Use `.env.example` only for placeholder values and variable names, never real credentials.
 - Rotate exposed credentials promptly.
@@ -56,7 +56,7 @@ This document describes planned safeguards. It does not mean those safeguards ha
 - Apply authentication, authorization, and rate limits where appropriate.
 - Configure CORS deliberately for applicable web interfaces.
 - Use safe error responses that do not reveal internal implementation details.
-- Keep the AI service and database inaccessible directly from public mobile clients.
+- Keep the AI service and database inaccessible directly from public clients.
 
 ## 8. AI Service and Third-Party Data
 
@@ -110,4 +110,11 @@ Legal and regulatory obligations must be assessed for the intended deployment lo
 
 ## 14. Current Status
 
-This is an initial security plan. The safeguards must be implemented, tested, and reviewed before they can be described as effective.
+This plan is not evidence that all safeguards are in place. The backend now delegates account registration, authentication, token
+refresh, logout, identity lookup, and account deletion to Supabase Auth. The
+service-role key is used only server-side for account deletion; passwords and
+provider error details are not logged or returned. Automated tests use mocked
+provider responses, and no live Supabase Auth configuration was available for
+integration testing. The frontend is not yet connected, browser token storage
+is not implemented, conversation data does not yet exist, and deployment
+rate-limiting and security controls still require review.

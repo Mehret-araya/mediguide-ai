@@ -4,7 +4,7 @@
 
 ## 1. Project Overview
 
-MediGuide AI is a safety-focused mobile application designed to make general health information easier to understand and help users identify appropriate next steps.
+MediGuide AI is a safety-focused web application designed to make general health information easier to understand and help users identify appropriate next steps.
 
 The project aims to provide accessible, evidence-grounded health education, with an initial focus on users in Ethiopia.
 
@@ -16,11 +16,11 @@ MediGuide AI is not clinically validated and is not a substitute for professiona
 
 ## 3. Initial Technology Stack
 
-- **Mobile:** React Native, Expo, TypeScript
+- **Frontend:** React, Vite, TypeScript
 - **Backend API:** Node.js, Express, TypeScript
 - **AI service:** Python, FastAPI
 - **Database:** PostgreSQL with pgvector
-- **Testing:** Jest or Vitest, Pytest, API and mobile tests
+- **Testing:** Vitest, Pytest, API and web tests
 
 ## 4. Initial Scope
 
@@ -50,21 +50,43 @@ MediGuide AI is not clinically validated and is not a substitute for professiona
 - Document requirements, architecture, safety, privacy, and testing decisions.
 - Do not claim features are implemented until they have been built and tested.
 
-## 7. Initial Repository Structure
+## 7. Repository Structure
 
-- `mobile/` — mobile application
+- `frontend/` — React web application
 - `backend/` — application API
 - `ai-service/` — AI and knowledge retrieval
-- `database/` — database migrations and seed data
-- `knowledge-base/` — approved source registry and ingestion workflow
+- `database/` — reserved for planned database migrations
 - `docs/` — project documentation
 
 ## 8. Current Milestone
 
-The repository includes an initial Express backend, PostgreSQL connection
-configuration, a source-review foundation, and a FastAPI AI-service health
-endpoint. AI answers, authentication, database migrations, and clinical
-safeguards are not yet implemented.
+The repository includes an Express backend with Supabase Auth registration,
+login, token refresh, logout, current-user lookup, and authenticated account
+deletion routes. It also includes PostgreSQL connection configuration, a
+source-review foundation, a responsive offline website, and a FastAPI
+AI-service health endpoint. RAG answers, database migrations, conversation
+history, verified facility data, and clinically reviewed emergency rules are
+not yet implemented.
+
+### Backend authentication setup
+
+Copy `backend/.env.example` to `backend/.env` and set `SUPABASE_URL` and
+`SUPABASE_ANON_KEY` from your Supabase project. Set
+`SUPABASE_SERVICE_ROLE_KEY` only in this trusted backend environment; it is
+used for authenticated account deletion and must never be sent to a browser,
+committed, or placed in frontend configuration. Supabase Auth uses HTTPS and
+does not depend on the PostgreSQL TLS certificate configuration.
+
+The backend exposes `/api/v1/auth/register`, `/login`, `/refresh`, `/logout`,
+`/me`, and `DELETE /api/v1/auth/account`. Authenticated requests use a bearer
+access token. Login and refresh responses contain short-lived access and
+rotating refresh tokens; clients must protect them and must not store them in
+browser local storage. The website has not yet been connected to these routes.
+Account deletion currently removes only the Supabase Auth identity because
+conversation and application records are not yet persisted.
+
+Run the web frontend from `frontend/` with `npm run dev`. The current website
+is an offline prototype and does not yet call the backend.
 
 ### Backend development configuration
 

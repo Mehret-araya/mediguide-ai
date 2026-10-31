@@ -61,6 +61,19 @@ describe("MediGuide AI API", () => {
     expect(response.status).toBe(404);
   });
 
+  it("mounts validated authentication routes under the versioned API", async () => {
+    const response = await request(app)
+      .post("/api/v1/auth/register")
+      .send({
+        name: "Example User",
+        email: "person@example.org",
+        password: "short",
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("VALIDATION_ERROR");
+  });
+
   it("returns 404 for an unknown API route", async () => {
     const response = await request(app).get("/api/v1/does-not-exist");
 

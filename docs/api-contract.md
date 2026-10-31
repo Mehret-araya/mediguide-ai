@@ -32,52 +32,92 @@ The process health endpoint, `GET /health`, is outside this prefix.
 
 ## 4. Authentication
 
-The authentication endpoints in this section are **planned and not yet implemented**.
+The authentication endpoints below are implemented by the Express backend and
+delegate identity and password storage to Supabase Auth. Supabase Auth requests
+use HTTPS; this does not use or bypass the PostgreSQL connection.
 
 ### POST /api/v1/auth/register
 
 Purpose: Create a user account.
 
-Planned request fields:
+Request fields:
 
 - `name`: required display name.
 - `email`: required email address.
-- `password`: required password meeting the project's documented password policy.
+- `password`: 12 to 128 characters. Supabase applies its configured password
+  policy as well.
 
-Expected success: `201 Created`.
+Expected success: `202 Accepted`. The response is intentionally generic to
+reduce account enumeration. The caller should direct the user to check their
+email only when confirmation is enabled in Supabase.
 
-The backend must validate input, securely hash passwords, and avoid revealing sensitive account information.
+The backend validates input and Supabase Auth stores credentials. The backend
+does not store or log passwords.
 
 ### POST /api/v1/auth/login
 
 Purpose: Authenticate an existing user.
 
-Planned request fields:
+Request fields:
 
 - `email`
 - `password`
 
 Expected success: `200 OK`.
 
-Authentication credentials must not be returned in response bodies or written to logs. The session strategy and mobile token-storage design must be documented before implementation.
+Expected success returns a minimal user object and provider-issued access and
+refresh tokens. Passwords and provider metadata are not returned or logged.
+Clients must keep tokens out of URLs, logs, and browser local storage. The
+website UI is not yet connected to these endpoints.
+
+### POST /api/v1/auth/refresh
+
+Request: `{ "refreshToken": "..." }`.
+
+Expected success: `200 OK` with a rotated access and refresh token pair. Store
+the new refresh token and discard the previous one.
 
 ### POST /api/v1/auth/logout
 
 Purpose: End the current authenticated session.
 
-Expected success: `200 OK` when the session is successfully ended.
+Expected success: `204 No Content` when the session is successfully ended.
 
-The implementation must invalidate or expire the relevant session or token according to the selected authentication strategy.
+Authentication: `Authorization: Bearer <access-token>`.
+
+The backend asks Supabase Auth to revoke only the current session. Clients
+should also discard their local token copies after logout.
 
 ### GET /api/v1/auth/me
 
 Purpose: Return the current authenticated user's basic account information.
 
-Authentication: Required.
+Authentication: Required using `Authorization: Bearer <access-token>`.
 
 Expected success: `200 OK`.
 
 Return only the account fields needed by the application. Never return password hashes, authentication secrets, or internal security metadata.
+
+### DELETE /api/v1/auth/account
+
+Authentication: Required using `Authorization: Bearer <access-token>`.
+
+Expected success: `204 No Content`.
+
+The backend resolves the account from the verified bearer token, then uses its
+server-only Supabase service-role key to delete that account. The caller cannot
+choose another user ID. This currently deletes the Supabase Auth identity only;
+conversation history and other persistent application data do not yet exist.
+When they do, account deletion must be extended and tested to cover those
+records and the documented retention policy.
+
+Registration and login enforce server-side email and password bounds. Provider
+errors are mapped to generic messages. The Supabase URL must use HTTPS except
+for loopback-only local development. The service-role key is required only for
+account deletion and must never be exposed to the client.
+
+Authentication errors currently use `{ "status": "error", "code": "...",
+"message": "..." }`. The API-wide standard error envelope remains future work.
 
 ## 5. Health Information and General Education
 
@@ -399,7 +439,7 @@ The education endpoints return illustrative examples only. They are not clinical
 
 Still planned or requiring further implementation and validation:
 
-- Authentication and account management.
+- Persistent account-related data and production token storage in the website.
 - AI-powered health questions and approved-source citations.
 - Conversation history, ownership enforcement, and deletion.
 - Healthcare facility discovery using verified data.

@@ -7,6 +7,7 @@ import express, {
   type Response,
 } from "express";
 import helmet from "helmet";
+import createAuthRouter from "./routes/auth.js";
 import educationRouter from "./routes/education.js";
 
 const app = express();
@@ -39,6 +40,7 @@ app.use(express.json({ limit: "10kb" }));
 
 // Versioned general health education endpoints.
 app.use("/api/v1/education", educationRouter);
+app.use("/api/v1/auth", createAuthRouter());
 
 // Process health check. This does not verify dependency readiness.
 app.get("/health", (_req: Request, res: Response) => {
