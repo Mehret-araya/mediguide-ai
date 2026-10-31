@@ -1,7 +1,8 @@
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import request from "supertest";
-import app from "./app.js";
+import express from "express";
+import app, { errorHandler } from "./app.js";
 
 describe("MediGuide AI API", () => {
   it("returns a healthy status from GET /health", async () => {
@@ -81,6 +82,42 @@ describe("MediGuide AI API", () => {
       status: "error",
       message: "The request contains invalid JSON.",
     });
+  });
+
+  it("returns 413 for a request body over the configured limit", async () => {
+    const response = await request(app)
+      .post("/api/v1/education")
+      .send({ content: "x".repeat(11 * 1024) });
+
+    expect(response.status).toBe(413);
+    expect(response.body).toEqual({
+      status: "error",
+      message: "The request body exceeds the allowed size.",
+    });
+  });
+
+  it("does not log unexpected error messages", async () => {
+    const testApp = express();
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    testApp.get("/failure", (_req, _res, next) => {
+      next(new Error("private health information"));
+    });
+    testApp.use(errorHandler);
+
+    try {
+      const response = await request(testApp).get("/failure");
+
+      expect(response.status).toBe(500);
+      expect(errorLog).toHaveBeenCalledWith(
+        "Unexpected API error:",
+        "Error",
+      );
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain(
+        "private health information",
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("blocks requests from unapproved origins", async () => {

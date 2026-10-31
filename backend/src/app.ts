@@ -58,7 +58,7 @@ app.use((_req: Request, res: Response) => {
 });
 
 // Handle unexpected errors without exposing internal details.
-const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (res.headersSent) {
     return;
   }
@@ -79,7 +79,27 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
 
-  console.error("Unexpected API error:", err);
+  const errorStatus =
+    typeof err === "object" && err !== null && "status" in err
+      ? err.status
+      : undefined;
+  const errorType =
+    typeof err === "object" && err !== null && "type" in err
+      ? err.type
+      : undefined;
+
+  if (errorStatus === 413 || errorType === "entity.too.large") {
+    res.status(413).json({
+      status: "error",
+      message: "The request body exceeds the allowed size.",
+    });
+    return;
+  }
+
+  console.error(
+    "Unexpected API error:",
+    err instanceof Error ? err.name : "UnknownError",
+  );
 
   res.status(500).json({
     status: "error",
