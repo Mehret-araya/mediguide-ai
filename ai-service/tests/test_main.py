@@ -33,6 +33,7 @@ async def test_health_check_reports_service_status() -> None:
         response = await client.get("/health")
 
     assert response.status_code == 200
+    assert response.headers.get("X-Request-ID")
     assert response.json() == {
         "status": "ok",
         "service": "MediGuide AI service",
@@ -48,6 +49,94 @@ async def test_unknown_route_returns_not_found() -> None:
         response = await client.get("/not-a-route")
 
     assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_valid_health_education_request_is_not_generated_yet() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/health-education",
+            json={"question": "What is malaria?"},
+        )
+
+    assert response.status_code == 501
+    assert response.headers.get("X-Request-ID")
+    assert response.json() == {
+        "code": "NOT_IMPLEMENTED",
+        "message": "Health education responses are not available yet.",
+        "requestId": response.headers["X-Request-ID"],
+    }
+
+
+@pytest.mark.anyio
+async def test_question_at_maximum_length_passes_validation() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/health-education",
+            json={"question": "q" * 2000},
+        )
+
+    assert response.status_code == 501
+
+
+def test_health_education_route_documents_request_and_error_schemas() -> None:
+    openapi = app.openapi()
+    operation = openapi["paths"]["/api/v1/health-education"]["post"]
+    request_schema = operation["requestBody"]["content"]["application/json"][
+        "schema"
+    ]
+
+    assert request_schema["$ref"].endswith("/HealthEducationRequest")
+    assert operation["responses"]["422"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/APIError")
+    assert operation["responses"]["501"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/APIError")
+    assert openapi["components"]["schemas"]["HealthEducationRequest"][
+        "properties"
+    ]["question"]["maxLength"] == 2000
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"question": ""},
+        {"question": "   "},
+        {"question": "q" * 2001},
+        {"question": "private health details", "language": "am"},
+    ],
+)
+async def test_invalid_health_education_request_returns_safe_error(
+    payload: dict[str, object],
+) -> None:
+    service = create_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=service),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/health-education",
+            json=payload,
+        )
+
+    assert response.status_code == 422
+    assert response.headers.get("X-Request-ID")
+    assert response.json() == {
+        "code": "VALIDATION_ERROR",
+        "message": "The request could not be accepted.",
+        "requestId": response.headers["X-Request-ID"],
+    }
+    assert "question" not in response.text
+    assert "private health details" not in response.text
 
 
 @pytest.mark.anyio
