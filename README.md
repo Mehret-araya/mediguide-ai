@@ -61,4 +61,7 @@ MediGuide AI is not clinically validated and is not a substitute for professiona
 
 ## 8. Current Milestone
 
-Establish the repository foundation and document the requirements before implementing application features.
+The repository includes an initial Express backend, PostgreSQL connection
+configuration, a source-review foundation, and a FastAPI AI-service health
+endpoint. AI answers, authentication, database migrations, and clinical
+safeguards are not yet implemented.

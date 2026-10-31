@@ -140,4 +140,9 @@ The following decisions require further documentation before implementation:
 
 ## 10. Current Status
 
-This document describes the intended architecture. It does not mean that the services have been built, secured, tested, or deployed.
+The repository currently contains an initial Express backend and PostgreSQL
+connection pool, plus a FastAPI AI-service process-health endpoint. The AI
+service does not yet implement retrieval, answer generation, or clinical
+safeguards. Authentication, database migrations, and production deployment
+remain unimplemented. This document does not mean that the services have been
+secured, clinically validated, or deployed.
