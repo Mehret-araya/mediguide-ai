@@ -18,9 +18,25 @@ optional `ai-service/.env` file:
 | `APP_VERSION` | `0.1.0` | Application version (`major.minor.patch`) |
 | `APP_ENV` | `development` | One of `development`, `testing`, or `production` |
 | `DEBUG` | `false` | FastAPI debug mode |
+| `LOG_LEVEL` | `INFO` | Minimum structured application log level |
 
 Environment variables take precedence over values in the local `.env` file.
 Invalid values are rejected during settings validation.
+
+## Request tracking and logging
+
+Logging is configured centrally in `app/core/logging_config.py` using
+`LOG_LEVEL`. Application request events are emitted as JSON with a UTC
+timestamp, request ID, method, matched route template, status code, and
+processing duration in milliseconds. Each HTTP response includes its generated
+ID in the `X-Request-ID` header.
+
+The middleware does not log request bodies, headers, query strings, or raw
+unmatched paths. Unexpected exceptions produce a generic HTTP 500 response;
+logs include the exception class but not its message or traceback. Uvicorn
+access logging is disabled to avoid logging raw request lines. Do not add
+passwords, tokens, medical questions, or personal health information to log
+messages or request paths.
 
 ## Development
 
