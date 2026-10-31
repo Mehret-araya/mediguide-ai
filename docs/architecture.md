@@ -140,9 +140,13 @@ The following decisions require further documentation before implementation:
 
 ## 10. Current Status
 
-The repository currently contains an initial Express backend and PostgreSQL
-connection pool, plus a FastAPI AI-service process-health endpoint. The AI
-service does not yet implement retrieval, answer generation, or clinical
-safeguards. Authentication, database migrations, and production deployment
-remain unimplemented. This document does not mean that the services have been
-secured, clinically validated, or deployed.
+The repository currently contains an Express backend, a PostgreSQL pool
+configuration that verifies TLS certificates by default, and a FastAPI
+AI-service process-health endpoint. Both API processes start locally and their
+health endpoints respond. PostgreSQL connectivity could not be verified in
+the current environment because the configured database presents an
+untrusted certificate chain; the backend supports a trusted CA file through
+`DATABASE_SSL_CA`. The AI service does not yet implement retrieval, answer
+generation, or clinical safeguards. Authentication, database migrations, and
+production deployment remain unimplemented. This document does not mean that
+the services have been clinically validated or deployed.

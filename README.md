@@ -65,3 +65,19 @@ The repository includes an initial Express backend, PostgreSQL connection
 configuration, a source-review foundation, and a FastAPI AI-service health
 endpoint. AI answers, authentication, database migrations, and clinical
 safeguards are not yet implemented.
+
+### Backend development configuration
+
+From the repository root, copy `backend/.env.example` to `backend/.env` and
+provide a PostgreSQL connection URL in `DATABASE_URL` before using the database
+pool. The pool verifies PostgreSQL TLS certificates by default. Set
+`DATABASE_SSL_CA` to a trusted CA certificate file when your database uses a
+private certificate authority. Set `DATABASE_SSL=false` only for local
+development databases that do not support TLS. Never commit `.env` or put real
+credentials in the example file.
+
+Run the backend from its directory with `npm run dev`. Its `/health` endpoint
+checks the API process only; live PostgreSQL connectivity is a separate
+dependency check. It could not be verified in this environment because the
+configured database presents a certificate chain that the environment does
+not trust.
