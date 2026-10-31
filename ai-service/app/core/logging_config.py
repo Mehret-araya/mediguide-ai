@@ -9,6 +9,11 @@ from app.core.config import Settings
 
 class JsonLogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
+        message = (
+            record.msg
+            if record.msg in {"request completed", "request failed"}
+            else "application event"
+        )
         entry: dict[str, Any] = {
             "timestamp": datetime.fromtimestamp(
                 record.created,
@@ -16,7 +21,7 @@ class JsonLogFormatter(logging.Formatter):
             ).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": message,
         }
 
         for field in (

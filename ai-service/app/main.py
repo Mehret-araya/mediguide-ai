@@ -1,10 +1,13 @@
 from fastapi import FastAPI
 
 from app.core.config import Settings
+from app.core.logging_config import configure_logging
+from app.core.request_logging import RequestTrackingMiddleware
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings if settings is not None else Settings()
+    configure_logging(config)
     service = FastAPI(
         title=config.app_name,
         description=(
@@ -14,6 +17,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=config.app_version,
         debug=config.debug,
     )
+    service.add_middleware(RequestTrackingMiddleware)
 
     @service.get("/health", tags=["health"])
     def health_check() -> dict[str, str]:
