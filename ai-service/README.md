@@ -2,9 +2,51 @@
 
 ## Status
 
-This service currently provides a FastAPI process-health endpoint only. It does
-not generate health answers, retrieve medical sources, or provide clinically
-reviewed emergency guidance.
+This service currently provides a FastAPI process-health endpoint and a
+validation-only health-education route. It does not generate health answers,
+retrieve medical sources, or provide clinically reviewed emergency guidance.
+
+## Health education API contract
+
+`POST /api/v1/health-education` accepts a JSON request with a required,
+non-blank `question` of at most 2,000 characters. `language` is optional and
+defaults to `"en"`; other language values are rejected. Invalid requests
+receive HTTP `422` with the standard error shape:
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "The request could not be accepted.",
+  "requestId": "request-id-from-response-header"
+}
+```
+
+The current endpoint is validation-only. A valid request receives HTTP `501`
+with a `NOT_IMPLEMENTED` error; it does not generate a health answer. The
+declared future success response is:
+
+```json
+{
+  "answer": "Health education response",
+  "language": "en",
+  "citations": [
+    {
+      "sourceId": "approved-source-id",
+      "title": "Source title",
+      "publisher": "Source publisher",
+      "url": "https://source.example/document",
+      "section": "Optional section"
+    }
+  ],
+  "limitations": ["General information only."],
+  "requestId": "request-id-from-response-header"
+}
+```
+
+The citation fields describe the schema only; no sources are currently
+retrieved or approved by this service. The request ID is also returned in the
+`X-Request-ID` header. Validation errors use a generic message and do not echo
+the submitted question.
 
 ## Configuration
 
