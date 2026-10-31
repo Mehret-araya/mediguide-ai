@@ -145,8 +145,10 @@ configuration that verifies TLS certificates by default, and a FastAPI
 AI-service process-health endpoint. Both API processes start locally and their
 health endpoints respond. PostgreSQL connectivity could not be verified in
 the current environment because the configured database presents an
-untrusted certificate chain; the backend supports a trusted CA file through
-`DATABASE_SSL_CA`. The AI service does not yet implement retrieval, answer
-generation, or clinical safeguards. Authentication, database migrations, and
-production deployment remain unimplemented. This document does not mean that
-the services have been clinically validated or deployed.
+untrusted certificate chain (`SELF_SIGNED_CERT_IN_CHAIN`). The backend
+supports a trusted Supabase CA file through `DATABASE_SSL_CA`; certificate
+verification must not be disabled for the hosted database. The AI service
+does not yet implement retrieval, answer generation, or clinical safeguards.
+Authentication, database migrations, and production deployment remain
+unimplemented. This document does not mean that the services have been
+clinically validated or deployed.

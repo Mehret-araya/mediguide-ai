@@ -72,12 +72,17 @@ From the repository root, copy `backend/.env.example` to `backend/.env` and
 provide a PostgreSQL connection URL in `DATABASE_URL` before using the database
 pool. The pool verifies PostgreSQL TLS certificates by default. Set
 `DATABASE_SSL_CA` to a trusted CA certificate file when your database uses a
-private certificate authority. Set `DATABASE_SSL=false` only for local
-development databases that do not support TLS. Never commit `.env` or put real
-credentials in the example file.
+private certificate authority. For Supabase, obtain the database root
+certificate from the project's authenticated Supabase dashboard and point
+`DATABASE_SSL_CA` to that local certificate file. Do not use a certificate
+retrieved from an unverified connection, and do not disable TLS verification
+for a hosted database. Set `DATABASE_SSL=false` only for local development
+databases that do not support TLS. Never commit `.env` or put real credentials
+in the example file.
 
 Run the backend from its directory with `npm run dev`. Its `/health` endpoint
 checks the API process only; live PostgreSQL connectivity is a separate
 dependency check. It could not be verified in this environment because the
-configured database presents a certificate chain that the environment does
-not trust.
+configured Supabase database presented a certificate chain Node.js does not
+trust (`SELF_SIGNED_CERT_IN_CHAIN`). Its CA must be configured using
+`DATABASE_SSL_CA` before a verified database query can succeed.
