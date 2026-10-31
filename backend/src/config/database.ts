@@ -3,6 +3,7 @@ import pg from "pg";
 import dotenv from "dotenv";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { createDatabasePoolConfig } from "./database-options.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 
@@ -10,18 +11,9 @@ dotenv.config({
   path: resolve(currentDirectory, "../../.env"),
 });
 
-const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString) {
-  throw new Error("DATABASE_URL is missing from backend/.env");
-}
-
-export const database = new pg.Pool({
-  connectionString,
-  ssl: { rejectUnauthorized: false },
-  max: 5,
-  connectionTimeoutMillis: 10000,
-});
+export const database = new pg.Pool(
+  createDatabasePoolConfig(process.env),
+);
 
 database.on("error", () => {
   console.error("Unexpected error from an idle PostgreSQL connection.");
