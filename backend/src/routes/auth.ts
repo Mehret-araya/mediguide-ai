@@ -5,6 +5,113 @@ import {
 } from "../auth/supabase-auth.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const ACCESS_COOKIE = "mediguide_access";
+const REFRESH_COOKIE = "mediguide_refresh";
+const REFRESH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
+
+function isProduction(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+function cookieOptions(maxAge?: number) {
+  return {
+    httpOnly: true,
+    secure: isProduction(),
+    sameSite: "lax" as const,
+    path: "/api/v1/auth",
+    ...(maxAge === undefined ? {} : { maxAge }),
+  };
+}
+
+function getCookie(req: Request, name: string): string | null {
+  const cookieHeader = req.get("cookie");
+
+  if (!cookieHeader) {
+    return null;
+  }
+
+  for (const part of cookieHeader.split(";")) {
+    const separator = part.indexOf("=");
+
+    if (separator < 0 || part.slice(0, separator).trim() !== name) {
+      continue;
+    }
+
+    try {
+      return decodeURIComponent(part.slice(separator + 1).trim());
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function getConfiguredOrigins(): string[] {
+  return (process.env.FRONTEND_URL || "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function isAllowedBrowserOrigin(req: Request): boolean {
+  const origin = req.get("origin");
+  return !origin || getConfiguredOrigins().includes(origin);
+}
+
+function validateBrowserOrigin(req: Request, res: Response): boolean {
+  if (!isAllowedBrowserOrigin(req)) {
+    res.status(403).json({
+      status: "error",
+      code: "ORIGIN_NOT_ALLOWED",
+      message: "This origin is not allowed to access the API.",
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function usesCookieSession(req: Request): boolean {
+  return getCookie(req, ACCESS_COOKIE) !== null;
+}
+
+function validateCookieMutationOrigin(
+  req: Request,
+  res: Response,
+): boolean {
+  if (usesCookieSession(req) && !req.get("origin")) {
+    res.status(403).json({
+      status: "error",
+      code: "ORIGIN_REQUIRED",
+      message: "A valid browser origin is required for this request.",
+    });
+    return false;
+  }
+
+  return validateBrowserOrigin(req, res);
+}
+
+function setSessionCookies(
+  res: Response,
+  session: { accessToken: string; refreshToken: string; expiresIn: number },
+): void {
+  res.cookie(
+    ACCESS_COOKIE,
+    session.accessToken,
+    cookieOptions(session.expiresIn * 1000),
+  );
+  res.cookie(
+    REFRESH_COOKIE,
+    session.refreshToken,
+    cookieOptions(REFRESH_COOKIE_MAX_AGE),
+  );
+}
+
+function clearSessionCookies(res: Response): void {
+  res.clearCookie(ACCESS_COOKIE, cookieOptions());
+  res.clearCookie(REFRESH_COOKIE, cookieOptions());
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -41,6 +148,10 @@ function getBearerToken(req: Request): string | null {
   return match?.[1] ?? null;
 }
 
+function getAccessToken(req: Request): string | null {
+  return getBearerToken(req) ?? getCookie(req, ACCESS_COOKIE);
+}
+
 function getCredentials(
   body: unknown,
 ): { email: string; password: string } | null {
@@ -72,6 +183,10 @@ export function createAuthRouter(
   const router = Router();
 
   router.post("/register", async (req, res, next) => {
+    if (!validateBrowserOrigin(req, res)) {
+      return;
+    }
+
     const credentials = getCredentials(req.body);
     const name =
       isRecord(req.body) && typeof req.body.name === "string"
@@ -104,6 +219,10 @@ export function createAuthRouter(
   });
 
   router.post("/login", async (req, res, next) => {
+    if (!validateBrowserOrigin(req, res)) {
+      return;
+    }
+
     const credentials = getCredentials(req.body);
 
     if (!credentials) {
@@ -119,33 +238,47 @@ export function createAuthRouter(
         credentials.email,
         credentials.password,
       );
-      res.status(200).json({ status: "ok", session });
+      setSessionCookies(res, session);
+      res.status(200).json({ status: "ok", user: session.user });
     } catch (error) {
       handleAuthError(error, res, next);
     }
   });
 
   router.post("/refresh", async (req, res, next) => {
-    const refreshToken =
-      isRecord(req.body) && typeof req.body.refreshToken === "string"
-        ? req.body.refreshToken
-        : "";
+    if (!validateCookieMutationOrigin(req, res)) {
+      return;
+    }
 
-    if (refreshToken.length === 0 || refreshToken.length > 4096) {
-      validationError(res, "Provide a valid refresh token.");
+    const refreshToken = getCookie(req, REFRESH_COOKIE);
+
+    if (!refreshToken || refreshToken.length > 4096) {
+      res.status(401).json({
+        status: "error",
+        code: "UNAUTHORIZED",
+        message: "A valid session is required.",
+      });
       return;
     }
 
     try {
       const session = await auth.refresh(refreshToken);
-      res.status(200).json({ status: "ok", session });
+      setSessionCookies(res, session);
+      res.status(200).json({ status: "ok", user: session.user });
     } catch (error) {
+      if (error instanceof SupabaseAuthError && error.statusCode === 401) {
+        clearSessionCookies(res);
+      }
       handleAuthError(error, res, next);
     }
   });
 
   router.post("/logout", async (req, res, next) => {
-    const accessToken = getBearerToken(req);
+    if (!validateCookieMutationOrigin(req, res)) {
+      return;
+    }
+
+    const accessToken = getAccessToken(req);
 
     if (!accessToken) {
       res.status(401).json({
@@ -158,14 +291,18 @@ export function createAuthRouter(
 
     try {
       await auth.logout(accessToken);
+      clearSessionCookies(res);
       res.status(204).end();
     } catch (error) {
+      if (error instanceof SupabaseAuthError && error.statusCode === 401) {
+        clearSessionCookies(res);
+      }
       handleAuthError(error, res, next);
     }
   });
 
   router.get("/me", async (req, res, next) => {
-    const accessToken = getBearerToken(req);
+    const accessToken = getAccessToken(req);
 
     if (!accessToken) {
       res.status(401).json({
@@ -195,7 +332,11 @@ export function createAuthRouter(
   });
 
   router.delete("/account", async (req, res, next) => {
-    const accessToken = getBearerToken(req);
+    if (!validateCookieMutationOrigin(req, res)) {
+      return;
+    }
+
+    const accessToken = getAccessToken(req);
 
     if (!accessToken) {
       res.status(401).json({
@@ -219,6 +360,7 @@ export function createAuthRouter(
       }
 
       await auth.deleteUser(user.id);
+      clearSessionCookies(res);
       res.status(204).end();
     } catch (error) {
       handleAuthError(error, res, next);

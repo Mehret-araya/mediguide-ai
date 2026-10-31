@@ -24,6 +24,7 @@ app.use(helmet());
 
 app.use(
   cors({
+    credentials: true,
     origin(origin, callback) {
       // Allow requests without an Origin header, such as local command-line tests.
       if (!origin || allowedOrigins.includes(origin)) {

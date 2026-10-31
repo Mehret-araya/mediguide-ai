@@ -65,17 +65,17 @@ Request fields:
 
 Expected success: `200 OK`.
 
-Expected success returns a minimal user object and provider-issued access and
-refresh tokens. Passwords and provider metadata are not returned or logged.
-Clients must keep tokens out of URLs, logs, and browser local storage. The
-website UI is not yet connected to these endpoints.
+Expected success returns the minimal user object. Provider-issued access and
+refresh tokens are set as `HttpOnly`, `SameSite=Lax` cookies scoped to
+`/api/v1/auth`; they are not returned in JSON or available to browser
+JavaScript. Cookies are marked `Secure` in production.
 
 ### POST /api/v1/auth/refresh
 
-Request: `{ "refreshToken": "..." }`.
+The refresh token is read from the HttpOnly cookie.
 
-Expected success: `200 OK` with a rotated access and refresh token pair. Store
-the new refresh token and discard the previous one.
+Expected success: `200 OK` with the minimal user object and rotated HttpOnly
+access and refresh cookies. The browser does not read or store either token.
 
 ### POST /api/v1/auth/logout
 
@@ -83,16 +83,18 @@ Purpose: End the current authenticated session.
 
 Expected success: `204 No Content` when the session is successfully ended.
 
-Authentication: `Authorization: Bearer <access-token>`.
+Authentication: Access cookie for browser clients, or
+`Authorization: Bearer <access-token>` for non-browser clients.
 
 The backend asks Supabase Auth to revoke only the current session. Clients
-should also discard their local token copies after logout.
+receive cleared session cookies after logout.
 
 ### GET /api/v1/auth/me
 
 Purpose: Return the current authenticated user's basic account information.
 
-Authentication: Required using `Authorization: Bearer <access-token>`.
+Authentication: Required using the HttpOnly access cookie for browser clients,
+or `Authorization: Bearer <access-token>` for non-browser clients.
 
 Expected success: `200 OK`.
 
@@ -100,7 +102,8 @@ Return only the account fields needed by the application. Never return password 
 
 ### DELETE /api/v1/auth/account
 
-Authentication: Required using `Authorization: Bearer <access-token>`.
+Authentication: Required using the HttpOnly access cookie for browser clients,
+or `Authorization: Bearer <access-token>` for non-browser clients.
 
 Expected success: `204 No Content`.
 
@@ -111,10 +114,13 @@ conversation history and other persistent application data do not yet exist.
 When they do, account deletion must be extended and tested to cover those
 records and the documented retention policy.
 
-Registration and login enforce server-side email and password bounds. Provider
-errors are mapped to generic messages. The Supabase URL must use HTTPS except
-for loopback-only local development. The service-role key is required only for
-account deletion and must never be exposed to the client.
+Registration and login enforce server-side email and password bounds. Cookie
+mutations enforce an allowed request Origin; cookie-authenticated mutations
+require an Origin header. Provider errors are mapped to generic messages. The
+Supabase URL must use HTTPS except for loopback-only local development. The
+service-role key is required only for account deletion and must never be
+exposed to the client. Deploy the frontend and API on the same site so the
+`SameSite=Lax` cookies are included in browser requests.
 
 Authentication errors currently use `{ "status": "error", "code": "...",
 "message": "..." }`. The API-wide standard error envelope remains future work.

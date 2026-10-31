@@ -106,7 +106,7 @@ describe("Supabase-backed authentication routes", () => {
     expect(response.text).not.toContain("test-service-role-key");
   });
 
-  it("returns a sanitized session on successful login", async () => {
+  it("sets HttpOnly auth cookies and returns no tokens on successful login", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({
         access_token: session.accessToken,
@@ -130,9 +130,18 @@ describe("Supabase-backed authentication routes", () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ status: "ok", session });
+    expect(response.body).toEqual({ status: "ok", user: session.user });
     expect(response.text).not.toContain("long-enough-test-password");
+    expect(response.text).not.toContain(session.accessToken);
+    expect(response.text).not.toContain(session.refreshToken);
     expect(response.text).not.toContain("test-service-role-key");
+    const cookies = JSON.stringify(response.headers["set-cookie"]);
+    expect(cookies.match(/mediguide_(?:access|refresh)=/gu)).toHaveLength(2);
+    expect(cookies).toContain("mediguide_access=");
+    expect(cookies.toLowerCase()).toContain("httponly");
+    expect(cookies.toLowerCase()).toContain("samesite=lax");
+    expect(cookies).toContain("Path=/api/v1/auth");
+    expect(cookies).toContain("mediguide_refresh=");
 
     const [url, options] = fetcher.mock.calls[0];
     expect(url.toString()).toContain(
@@ -186,7 +195,7 @@ describe("Supabase-backed authentication routes", () => {
     expect(response.text).not.toContain("provider detail");
   });
 
-  it("rotates refresh tokens through the Supabase refresh endpoint", async () => {
+  it("rotates refresh cookies without returning tokens to the browser", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({
         access_token: session.accessToken,
@@ -200,10 +209,18 @@ describe("Supabase-backed authentication routes", () => {
 
     const response = await request(app)
       .post("/api/v1/auth/refresh")
-      .send({ refreshToken: "test-refresh-token" });
+      .set("Origin", "http://localhost:5173")
+      .set("Cookie", "mediguide_refresh=test-refresh-token");
 
     expect(response.status).toBe(200);
-    expect(response.body.session.refreshToken).toBe("rotated-refresh-token");
+    expect(response.body).toEqual({ status: "ok", user: session.user });
+    expect(response.text).not.toContain(session.accessToken);
+    expect(response.text).not.toContain("rotated-refresh-token");
+    expect(
+      JSON.stringify(response.headers["set-cookie"]).match(
+        /mediguide_(?:access|refresh)=/gu,
+      ),
+    ).toHaveLength(2);
     const [url, options] = fetcher.mock.calls[0];
     expect(url.toString()).toContain(
       "/auth/v1/token?grant_type=refresh_token",
@@ -236,6 +253,23 @@ describe("Supabase-backed authentication routes", () => {
     });
   });
 
+  it("authenticates browser requests using HttpOnly session cookies", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      providerResponse(session.user),
+    );
+    const app = createTestApp(fetcher);
+
+    const response = await request(app)
+      .get("/api/v1/auth/me")
+      .set("Cookie", `mediguide_access=${session.accessToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: "ok", user: session.user });
+    expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({
+      authorization: `Bearer ${session.accessToken}`,
+    });
+  });
+
   it("revokes the authenticated session on logout", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse(null, 204),
@@ -253,6 +287,25 @@ describe("Supabase-backed authentication routes", () => {
     expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({
       authorization: `Bearer ${session.accessToken}`,
     });
+  });
+
+  it("requires an allowed Origin for cookie-authenticated mutations", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const app = createTestApp(fetcher);
+
+    const missingOrigin = await request(app)
+      .post("/api/v1/auth/logout")
+      .set("Cookie", `mediguide_access=${session.accessToken}`);
+    expect(missingOrigin.status).toBe(403);
+    expect(missingOrigin.body.code).toBe("ORIGIN_REQUIRED");
+
+    const untrustedOrigin = await request(app)
+      .post("/api/v1/auth/logout")
+      .set("Origin", "https://attacker.example")
+      .set("Cookie", `mediguide_access=${session.accessToken}`);
+    expect(untrustedOrigin.status).toBe(403);
+    expect(untrustedOrigin.body.code).toBe("ORIGIN_NOT_ALLOWED");
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("deletes only the account resolved from the authenticated session", async () => {
