@@ -118,7 +118,9 @@ The application must not claim to rule out an emergency or guarantee that a user
 - Supabase Auth manages account identities and password storage. The backend
   validates bearer tokens with Supabase Auth and keeps its service-role key
   server-side.
-- The AI service accepts requests only through a controlled server-to-server interface.
+- The Express API calls the private FastAPI service over a configured
+  server-to-server URL using a shared secret header; browser clients never
+  receive this secret. Production requires HTTPS and network isolation.
 - Database credentials remain server-side.
 - Secrets are supplied through environment configuration and excluded from Git.
 - Private conversation data must not be accessible to other users.

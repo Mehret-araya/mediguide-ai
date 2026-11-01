@@ -92,6 +92,15 @@ Deploy the frontend and API on the same site so the `SameSite=Lax` session
 cookies are sent by the browser. The frontend configuration must never contain
 Supabase keys. Run the frontend from `frontend/` with `npm run dev`.
 
+The Express API also exposes `POST /api/v1/health-education` as a proxy to the
+private FastAPI service. Configure the same privately generated
+`AI_SERVICE_TOKEN` in `backend/.env` and `ai-service/.env`, and set the trusted
+backend-only `AI_SERVICE_URL`. Do not put these values in frontend settings.
+FastAPI rejects requests without the shared token; in production, use HTTPS
+and restrict AI-service network access to the backend. No live deployment
+integration or production source corpus has been verified; the AI service
+abstains when no approved documents are configured.
+
 ### Backend development configuration
 
 From the repository root, copy `backend/.env.example` to `backend/.env` and

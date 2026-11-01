@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _AI_SERVICE_ROOT = Path(__file__).resolve().parents[2]
@@ -24,3 +24,4 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     knowledge_base_manifest: Path | None = None
+    ai_service_token: SecretStr | None = None

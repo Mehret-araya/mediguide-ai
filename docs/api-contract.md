@@ -137,15 +137,17 @@ Authentication errors currently use `{ "status": "error", "code": "...",
 
 #### POST /api/v1/health-education
 
-**Implementation status: Foundation implemented in FastAPI; not connected to
-the public Express API.**
+**Implementation status: Express proxy and internal FastAPI foundation
+implemented; no live deployment integration has been verified.**
 
 Purpose: Return general educational source passages for a question when
 relevant approved chunks are available.
 
-Authentication: No route-level authentication. This service is internal and
-must be network-restricted behind the backend; it must not be exposed directly
-to frontend clients.
+The public Express route is `POST /api/v1/health-education`. It validates the
+request and forwards it to the private FastAPI service. The FastAPI route is
+not a browser API: it requires the shared `AI_SERVICE_TOKEN` in the
+`X-Internal-Service-Token` header and should also be network-restricted behind
+the Express backend. The backend never returns the shared token.
 
 Request:
 
@@ -192,9 +194,23 @@ abstention with no citations. No approved production documents are currently
 loaded, so the default runtime abstains. Example URLs and placeholder
 citations above are schema illustrations only.
 
-The FastAPI route validates question length and language. The public Express
-API does not call this route yet; authentication, usage limits, and
-service-to-service controls must be implemented before public integration.
+The Express proxy and FastAPI route both validate the question and English-only
+language. The backend forwards a server-generated request ID in
+`X-Request-ID`; the AI service echoes the validated ID in the response body
+and response header. The backend validates that ID and the response/citation
+shape before returning it.
+
+The backend uses `AI_SERVICE_URL` and `AI_SERVICE_TOKEN` from its trusted
+environment. It permits HTTPS service URLs; HTTP is allowed only for loopback
+development addresses. Requests have an eight-second timeout, redirects are
+rejected, and failures return generic 502/503/504 responses without exposing
+the internal URL, token, or upstream error body. Configure the same privately
+generated token as `AI_SERVICE_TOKEN` in both the backend and AI-service
+environments. Do not put this token in frontend configuration.
+
+The route remains an unverified integration against any live deployment.
+Authentication/usage limits for health-question submissions and complete
+service deployment/network controls remain outstanding.
 
 The response must not imply that a diagnosis was established or that an emergency was ruled out.
 

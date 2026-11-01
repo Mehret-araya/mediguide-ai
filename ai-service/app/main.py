@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request
+import secrets
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -71,7 +72,29 @@ def create_app(
     async def submit_health_education_question(
         question: HealthEducationRequest,
         request: Request,
+        internal_token: str | None = Header(
+            default=None,
+            alias="X-Internal-Service-Token",
+        ),
     ) -> HealthEducationResponse:
+        expected_token = (
+            config.ai_service_token.get_secret_value()
+            if config.ai_service_token is not None
+            else None
+        )
+        if expected_token is None or not expected_token.strip():
+            raise HTTPException(
+                status_code=503,
+                detail="Health education service is unavailable.",
+            )
+        if internal_token is None or not secrets.compare_digest(
+            internal_token,
+            expected_token,
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="A valid internal service credential is required.",
+            )
         return await assistant.answer(
             question.question,
             request_id=request.state.request_id,

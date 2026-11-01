@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from uuid import uuid4
 
@@ -7,6 +8,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 logger = logging.getLogger("mediguide.request")
+_REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 
 class RequestTrackingMiddleware(BaseHTTPMiddleware):
@@ -15,7 +17,12 @@ class RequestTrackingMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
-        request_id = uuid4().hex
+        supplied_request_id = request.headers.get("x-request-id", "")
+        request_id = (
+            supplied_request_id
+            if _REQUEST_ID_PATTERN.fullmatch(supplied_request_id)
+            else uuid4().hex
+        )
         request.state.request_id = request_id
         started_at = time.perf_counter()
         exception_type: str | None = None

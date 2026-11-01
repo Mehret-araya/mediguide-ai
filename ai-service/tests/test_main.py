@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.main import app, create_app
@@ -54,13 +55,20 @@ async def test_unknown_route_returns_not_found() -> None:
 
 @pytest.mark.anyio
 async def test_empty_approved_corpus_returns_an_explicit_abstention() -> None:
+    service = create_app(
+        Settings(
+            app_env="testing",
+            ai_service_token=SecretStr("test-internal-token"),
+        )
+    )
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+        transport=httpx.ASGITransport(app=service),
         base_url="http://testserver",
     ) as client:
         response = await client.post(
             "/api/v1/health-education",
             json={"question": "What is malaria?"},
+            headers={"X-Internal-Service-Token": "test-internal-token"},
         )
 
     assert response.status_code == 200
@@ -75,13 +83,20 @@ async def test_empty_approved_corpus_returns_an_explicit_abstention() -> None:
 
 @pytest.mark.anyio
 async def test_question_at_maximum_length_passes_validation() -> None:
+    service = create_app(
+        Settings(
+            app_env="testing",
+            ai_service_token=SecretStr("test-internal-token"),
+        )
+    )
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+        transport=httpx.ASGITransport(app=service),
         base_url="http://testserver",
     ) as client:
         response = await client.post(
             "/api/v1/health-education",
             json={"question": "q" * 2000},
+            headers={"X-Internal-Service-Token": "test-internal-token"},
         )
 
     assert response.status_code == 200
@@ -155,6 +170,7 @@ async def test_answer_uses_a_retrieved_passage_and_its_verified_metadata(
     service = create_app(
         Settings(
             app_env="testing",
+            ai_service_token=SecretStr("test-internal-token"),
             knowledge_base_manifest=manifest_path,
         )
     )
@@ -166,6 +182,7 @@ async def test_answer_uses_a_retrieved_passage_and_its_verified_metadata(
         response = await client.post(
             "/api/v1/health-education",
             json={"question": "What causes malaria?"},
+            headers={"X-Internal-Service-Token": "test-internal-token"},
         )
 
     assert response.status_code == 200
@@ -199,13 +216,20 @@ async def test_answer_uses_a_retrieved_passage_and_its_verified_metadata(
 async def test_personal_clinical_request_is_refused_without_citations(
     question: str,
 ) -> None:
+    service = create_app(
+        Settings(
+            app_env="testing",
+            ai_service_token=SecretStr("test-internal-token"),
+        )
+    )
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app()),
+        transport=httpx.ASGITransport(app=service),
         base_url="http://testserver",
     ) as client:
         response = await client.post(
             "/api/v1/health-education",
             json={"question": question},
+            headers={"X-Internal-Service-Token": "test-internal-token"},
         )
 
     assert response.status_code == 200
@@ -214,6 +238,83 @@ async def test_personal_clinical_request_is_refused_without_citations(
         or "can't recommend" in response.json()["answer"]
     )
     assert response.json()["citations"] == []
+
+
+@pytest.mark.anyio
+async def test_health_education_route_rejects_missing_or_invalid_service_token() -> None:
+    service = create_app(
+        Settings(
+            app_env="testing",
+            ai_service_token=SecretStr("test-internal-token"),
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=service),
+        base_url="http://testserver",
+    ) as client:
+        missing = await client.post(
+            "/api/v1/health-education",
+            json={"question": "What is malaria?"},
+        )
+        invalid = await client.post(
+            "/api/v1/health-education",
+            json={"question": "What is malaria?"},
+            headers={"X-Internal-Service-Token": "wrong-token"},
+        )
+
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+    assert "test-internal-token" not in missing.text + invalid.text
+
+
+@pytest.mark.anyio
+async def test_health_education_route_fails_closed_without_configured_token() -> None:
+    for token in (None, SecretStr("")):
+        service = create_app(
+            Settings(
+                app_env="testing",
+                ai_service_token=token,
+            )
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=service),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/v1/health-education",
+                json={"question": "What is malaria?"},
+                headers={"X-Internal-Service-Token": "unconfigured"},
+            )
+
+        assert response.status_code == 503
+        assert "service credential" not in response.text
+
+
+@pytest.mark.anyio
+async def test_health_education_route_propagates_valid_request_id() -> None:
+    request_id = "a" * 32
+    service = create_app(
+        Settings(
+            app_env="testing",
+            ai_service_token=SecretStr("test-internal-token"),
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=service),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/health-education",
+            json={"question": "What is malaria?"},
+            headers={
+                "X-Internal-Service-Token": "test-internal-token",
+                "X-Request-ID": request_id,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"] == request_id
+    assert response.json()["requestId"] == request_id
 
 
 @pytest.mark.anyio

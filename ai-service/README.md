@@ -75,8 +75,13 @@ send user questions or source documents to an external embedding service
 without an explicit provider, privacy review, and configuration.
 
 The route is an internal AI-service endpoint, not a public frontend API.
-Production deployment must keep the service behind the backend and restrict
-network access accordingly.
+Every health-education request must include the shared
+`X-Internal-Service-Token`. Set `AI_SERVICE_TOKEN` to the same private value
+in the FastAPI and Express environments. If it is unset, the health-education
+route fails closed with `503`; invalid/missing request credentials receive
+`401`. Production deployment must keep the service behind the backend and
+restrict network access accordingly; the token is not a substitute for
+network isolation or HTTPS.
 
 ## Approved local source manifest
 
@@ -112,6 +117,7 @@ optional `ai-service/.env` file:
 | `DEBUG` | `false` | FastAPI debug mode |
 | `LOG_LEVEL` | `INFO` | Minimum structured application log level |
 | `KNOWLEDGE_BASE_MANIFEST` | unset | Optional local approved-source manifest |
+| `AI_SERVICE_TOKEN` | unset | Shared secret required for backend-to-AI calls |
 
 Environment variables take precedence over values in the local `.env` file.
 Invalid values are rejected during settings validation.
