@@ -65,6 +65,65 @@ function getUser(value: unknown): AuthUser | null {
   return { id, email };
 }
 
+function getProviderCode(payload: unknown): string {
+  if (!isRecord(payload)) {
+    return "unavailable";
+  }
+
+  const value = payload.code ?? payload.error_code;
+
+  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,80}$/u.test(value)
+    ? value
+    : "unavailable";
+}
+
+function redactSensitiveValues(
+  message: string,
+  sensitiveValues: readonly string[],
+): string {
+  let sanitized = message;
+
+  for (const value of sensitiveValues) {
+    if (value.length > 0) {
+      sanitized = sanitized.replace(
+        new RegExp(value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "giu"),
+        "[REDACTED]",
+      );
+    }
+  }
+
+  return sanitized
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "[REDACTED]")
+    .replace(
+      /\b(?:sb_(?:publishable|secret)_[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b/gu,
+      "[REDACTED]",
+    )
+    .replace(
+      /\b(?:api[_ -]?key|password|token|secret)\s*[:=]\s*["']?[^,\s"']+/giu,
+      "[REDACTED]",
+    )
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/gu, "[REDACTED]")
+    .replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/giu, "[REDACTED]")
+    .replace(/\+?\d[\d\s().-]{7,}\d/gu, "[REDACTED]")
+    .replace(/[\u0000-\u001f\u007f]/gu, " ")
+    .slice(0, 240);
+}
+
+function getProviderMessage(
+  payload: unknown,
+  sensitiveValues: readonly string[],
+): string {
+  if (!isRecord(payload)) {
+    return "unavailable";
+  }
+
+  const value = payload.msg ?? payload.message ?? payload.error_description;
+
+  return typeof value === "string"
+    ? redactSensitiveValues(value, sensitiveValues)
+    : "unavailable";
+}
+
 function getLocalHostname(url: URL): boolean {
   return (
     url.hostname === "localhost" ||
@@ -88,8 +147,35 @@ export class SupabaseAuthClient {
     });
 
     if (!response.ok) {
+      const environment = this.environment();
+      await this.logSignupProviderFailure(response, [
+        email,
+        password,
+        name,
+        environment.SUPABASE_ANON_KEY ?? "",
+        environment.SUPABASE_SERVICE_ROLE_KEY ?? "",
+      ]);
       this.throwForProviderResponse(response, "The account could not be created.");
     }
+  }
+
+  private async logSignupProviderFailure(
+    response: Response,
+    sensitiveValues: readonly string[],
+  ): Promise<void> {
+    let payload: unknown = null;
+
+    try {
+      payload = await response.clone().json();
+    } catch {
+      // The provider may return an empty or non-JSON error body.
+    }
+
+    console.error("Supabase Auth signup failed", {
+      providerStatus: response.status,
+      providerCode: getProviderCode(payload),
+      providerMessage: getProviderMessage(payload, sensitiveValues),
+    });
   }
 
   async login(email: string, password: string): Promise<AuthSession> {
