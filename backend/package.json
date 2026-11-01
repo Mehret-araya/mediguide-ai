@@ -10,7 +10,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:database": "vitest run src/config/database.integration.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.6",
