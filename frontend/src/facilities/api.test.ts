@@ -22,6 +22,7 @@ describe('healthcare facility API', () => {
       area: 'Addis Ababa',
       type: 'hospital',
     })).resolves.toEqual([])
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^\/api\/v1\//u)
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       'area=Addis+Ababa&type=hospital',
     )

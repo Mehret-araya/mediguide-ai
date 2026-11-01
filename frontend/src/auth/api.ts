@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from '../api-base-url'
+
 export interface AuthUser {
   id: string
   email: string
@@ -25,8 +27,7 @@ export class AuthApiError extends Error {
   }
 }
 
-const apiBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:5000')
-  .replace(/\/+$/u, '')
+const apiBaseUrl = getApiBaseUrl()
 
 async function request<T>(
   path: string,

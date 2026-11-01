@@ -94,7 +94,15 @@ cascade deletes the user's profile and conversations when both tracked
 migrations are applied. This behavior must be verified against the intended
 Supabase project before production use.
 
-Copy `frontend/.env.example` to `frontend/.env` to override `VITE_API_URL`.
+In local development, the frontend uses Vite's `/api` proxy to reach the
+Express service on `127.0.0.1:5000`; keep `VITE_API_URL` blank for this setup.
+Start the backend and frontend in separate terminals. If the Vite development
+server chooses a loopback host/port other than `localhost:5173`, development
+CORS and cookie-origin validation accept HTTP loopback origins only; remote
+hosts remain disallowed. `VITE_API_URL` may be set to an absolute API origin
+when a deployment does not provide a same-origin proxy, and the backend's
+`FRONTEND_URL` must list that exact production frontend origin.
+
 Deploy the frontend and API on the same site so the `SameSite=Lax` session
 cookies are sent by the browser. The frontend configuration must never contain
 Supabase keys. Run the frontend from `frontend/` with `npm run dev`.

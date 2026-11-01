@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from '../api-base-url'
+
 export interface ConversationSummary {
   id: string
   created_at: string
@@ -37,8 +39,7 @@ export class ConversationApiError extends Error {
   }
 }
 
-const apiBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:5000')
-  .replace(/\/+$/u, '')
+const apiBaseUrl = getApiBaseUrl()
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

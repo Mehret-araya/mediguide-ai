@@ -77,6 +77,7 @@ describe('credentialed conversation API', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       '/api/v1/conversations/conversation%2F1/messages',
     )
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^\/api\/v1\//u)
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: 'POST',
       credentials: 'include',
