@@ -5,6 +5,54 @@ import { createDatabasePoolConfig } from "./database-options.js";
 
 const integrationEnabled = process.env.RUN_DATABASE_INTEGRATION === "true";
 
+function normalizeStringArray(value: unknown, column: string): string[] {
+  let parsed = value;
+
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed) as unknown;
+    } catch {
+      throw new Error(
+        `PostgreSQL returned an invalid JSON array for ${column}.`,
+      );
+    }
+  }
+
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every((item): item is string => typeof item === "string")
+  ) {
+    const resultType = Array.isArray(parsed) ? "non-string array" : typeof parsed;
+    throw new Error(
+      `PostgreSQL returned ${resultType} for ${column}; expected a string array.`,
+    );
+  }
+
+  return parsed;
+}
+
+describe("PostgreSQL schema result normalization", () => {
+  it("accepts PostgreSQL driver arrays", () => {
+    expect(normalizeStringArray(["one", "two"], "test_column")).toEqual([
+      "one",
+      "two",
+    ]);
+  });
+
+  it("parses JSON-encoded arrays and rejects invalid result types", () => {
+    expect(normalizeStringArray('["one","two"]', "test_column")).toEqual([
+      "one",
+      "two",
+    ]);
+    expect(() => normalizeStringArray("not-json", "test_column")).toThrow(
+      "PostgreSQL returned an invalid JSON array for test_column.",
+    );
+    expect(() => normalizeStringArray(1, "test_column")).toThrow(
+      "PostgreSQL returned number for test_column; expected a string array.",
+    );
+  });
+});
+
 describe("Supabase database foundation", () => {
   it.skipIf(!integrationEnabled)(
     "connects with verified TLS and verifies the migrated schema",
@@ -45,13 +93,13 @@ describe("Supabase database foundation", () => {
         let schema;
         try {
           schema = await pool.query<{
-            missing_objects: string[];
-            missing_rls: string[];
-            invalid_ownership_policies: string[];
-            public_data_privileges: string[];
-            service_role_privileges: string[];
+            missing_objects: unknown;
+            missing_rls: unknown;
+            invalid_ownership_policies: unknown;
+            public_data_privileges: unknown;
+            service_role_privileges: unknown;
             embedding_dimensioned: boolean;
-            dimension_dependent_indexes: string[];
+            dimension_dependent_indexes: unknown;
           }>(`
             WITH expected_relations(object_name) AS (
               VALUES
@@ -124,7 +172,7 @@ describe("Supabase database foundation", () => {
                 ('public.health_source_chunks', 'TRUNCATE')
             )
             SELECT
-              ARRAY(
+              to_json(ARRAY(
                 SELECT expected.object_name
                 FROM expected_relations AS expected
                 WHERE to_regclass(
@@ -134,8 +182,8 @@ describe("Supabase database foundation", () => {
                 SELECT 'extensions.vector'
                 WHERE to_regtype('extensions.vector') IS NULL
                 ORDER BY 1
-              ) AS missing_objects,
-              ARRAY(
+              )) AS missing_objects,
+              to_json(ARRAY(
                 SELECT expected.table_name
                 FROM expected_rls AS expected
                 WHERE NOT COALESCE((
@@ -146,8 +194,8 @@ describe("Supabase database foundation", () => {
                   )
                 ), FALSE)
                 ORDER BY expected.table_name
-              ) AS missing_rls,
-              ARRAY(
+              )) AS missing_rls,
+              to_json(ARRAY(
                 SELECT expected.policy_name
                 FROM expected_policies AS expected
                 LEFT JOIN pg_policies AS policy
@@ -171,8 +219,8 @@ describe("Supabase database foundation", () => {
                       ) NOT ILIKE
                         concat('%', expected.ownership_column, '%')
                 ORDER BY expected.policy_name
-              ) AS invalid_ownership_policies,
-              ARRAY(
+              )) AS invalid_ownership_policies,
+              to_json(ARRAY(
                 SELECT format(
                   '%s has unexpected %s on %s',
                   'anon',
@@ -190,8 +238,8 @@ describe("Supabase database foundation", () => {
                 )
                 ORDER BY private_relation.relation_name,
                          privilege.privilege_name
-              ) AS public_data_privileges,
-              ARRAY(
+              )) AS public_data_privileges,
+              to_json(ARRAY(
                 SELECT format(
                   'service_role has unexpected %s on %s',
                   restricted.privilege_name,
@@ -205,7 +253,7 @@ describe("Supabase database foundation", () => {
                 )
                 ORDER BY restricted.relation_name,
                          restricted.privilege_name
-              ) AS service_role_privileges,
+              )) AS service_role_privileges,
               COALESCE((
                 SELECT attribute.atttypmod <> -1
                 FROM pg_attribute AS attribute
@@ -214,7 +262,7 @@ describe("Supabase database foundation", () => {
                   AND attribute.attname = 'embedding'
                   AND NOT attribute.attisdropped
               ), FALSE) AS embedding_dimensioned,
-              ARRAY(
+              to_json(ARRAY(
                 SELECT index_relation.relname
                 FROM pg_index AS index_definition
                 JOIN pg_class AS index_relation
@@ -225,7 +273,7 @@ describe("Supabase database foundation", () => {
                       to_regclass('public.health_source_chunks')
                   AND access_method.amname IN ('hnsw', 'ivfflat')
                 ORDER BY index_relation.relname
-              ) AS dimension_dependent_indexes
+              )) AS dimension_dependent_indexes
           `);
         } catch (error) {
           const code =
@@ -240,7 +288,31 @@ describe("Supabase database foundation", () => {
           );
         }
 
-        const checks = schema.rows[0];
+        const row = schema.rows[0];
+        const checks = {
+          ...row,
+          missing_objects: normalizeStringArray(
+            row.missing_objects,
+            "missing_objects",
+          ),
+          missing_rls: normalizeStringArray(row.missing_rls, "missing_rls"),
+          invalid_ownership_policies: normalizeStringArray(
+            row.invalid_ownership_policies,
+            "invalid_ownership_policies",
+          ),
+          public_data_privileges: normalizeStringArray(
+            row.public_data_privileges,
+            "public_data_privileges",
+          ),
+          service_role_privileges: normalizeStringArray(
+            row.service_role_privileges,
+            "service_role_privileges",
+          ),
+          dimension_dependent_indexes: normalizeStringArray(
+            row.dimension_dependent_indexes,
+            "dimension_dependent_indexes",
+          ),
+        };
         const failures = [
           ...(checks.missing_objects.length > 0
             ? [`missing objects: ${checks.missing_objects.join(", ")}`]
