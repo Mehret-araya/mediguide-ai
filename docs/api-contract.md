@@ -32,52 +32,104 @@ The process health endpoint, `GET /health`, is outside this prefix.
 
 ## 4. Authentication
 
-The authentication endpoints in this section are **planned and not yet implemented**.
+The authentication endpoints below are implemented by the Express backend and
+delegate identity and password storage to Supabase Auth. Supabase Auth requests
+use HTTPS; this does not use or bypass the PostgreSQL connection.
 
 ### POST /api/v1/auth/register
 
 Purpose: Create a user account.
 
-Planned request fields:
+Request fields:
 
 - `name`: required display name.
 - `email`: required email address.
-- `password`: required password meeting the project's documented password policy.
+- `password`: 12 to 128 characters. Supabase applies its configured password
+  policy as well.
 
-Expected success: `201 Created`.
+Expected success: `202 Accepted`. The response is intentionally generic to
+reduce account enumeration. The caller should direct the user to check their
+email only when confirmation is enabled in Supabase.
 
-The backend must validate input, securely hash passwords, and avoid revealing sensitive account information.
+The backend validates input and Supabase Auth stores credentials. The backend
+does not store or log passwords.
 
 ### POST /api/v1/auth/login
 
 Purpose: Authenticate an existing user.
 
-Planned request fields:
+Request fields:
 
 - `email`
 - `password`
 
 Expected success: `200 OK`.
 
-Authentication credentials must not be returned in response bodies or written to logs. The session strategy and mobile token-storage design must be documented before implementation.
+Expected success returns the minimal user object. Provider-issued access and
+refresh tokens are set as `HttpOnly`, `SameSite=Lax` cookies scoped to
+`/api/v1/auth`; they are not returned in JSON or available to browser
+JavaScript. Cookies are marked `Secure` in production.
+
+### POST /api/v1/auth/refresh
+
+The refresh token is read from the HttpOnly cookie.
+
+Expected success: `200 OK` with the minimal user object and rotated HttpOnly
+access and refresh cookies. The browser does not read or store either token.
 
 ### POST /api/v1/auth/logout
 
 Purpose: End the current authenticated session.
 
-Expected success: `200 OK` when the session is successfully ended.
+Expected success: `204 No Content` when the session is successfully ended.
 
-The implementation must invalidate or expire the relevant session or token according to the selected authentication strategy.
+Authentication: Access cookie for browser clients, or
+`Authorization: Bearer <access-token>` for non-browser clients.
+
+The backend asks Supabase Auth to revoke only the current session. Clients
+receive cleared session cookies after logout.
 
 ### GET /api/v1/auth/me
 
 Purpose: Return the current authenticated user's basic account information.
 
-Authentication: Required.
+Authentication: Required using the HttpOnly access cookie for browser clients,
+or `Authorization: Bearer <access-token>` for non-browser clients.
 
 Expected success: `200 OK`.
 
 Return only the account fields needed by the application. Never return password hashes, authentication secrets, or internal security metadata.
+
+### DELETE /api/v1/auth/account
+
+Authentication: Required using the HttpOnly access cookie for browser clients,
+or `Authorization: Bearer <access-token>` for non-browser clients.
+
+Expected success: `204 No Content`.
+
+The backend resolves the account from the verified bearer token, then uses its
+server-only Supabase service-role key to delete that account. The caller cannot
+choose another user ID. This currently deletes the Supabase Auth identity only;
+conversation history and other persistent application data do not yet exist.
+When they do, account deletion must be extended and tested to cover those
+records and the documented retention policy.
+
+Registration and login enforce server-side email and password bounds. Cookie
+mutations enforce an allowed request Origin; cookie-authenticated mutations
+require an Origin header. Provider errors are mapped to generic messages. The
+Supabase URL must use HTTPS except for loopback-only local development. The
+service-role key is required only for account deletion and must never be
+exposed to the client. Deploy the frontend and API on the same site so the
+`SameSite=Lax` cookies are included in browser requests.
+
+The React frontend calls these routes with `credentials: "include"` and uses
+`VITE_API_URL` to select the Express API origin. The sign-in, registration,
+session restoration, logout, and account deletion UI is implemented. No
+conversation or history route is currently protected because persistent
+history endpoints do not exist yet.
+
+Authentication errors currently use `{ "status": "error", "code": "...",
+"message": "..." }`. The API-wide standard error envelope remains future work.
 
 ## 5. Health Information and General Education
 
@@ -399,7 +451,7 @@ The education endpoints return illustrative examples only. They are not clinical
 
 Still planned or requiring further implementation and validation:
 
-- Authentication and account management.
+- Persistent account-related data and production token storage in the website.
 - AI-powered health questions and approved-source citations.
 - Conversation history, ownership enforcement, and deletion.
 - Healthcare facility discovery using verified data.
