@@ -11,7 +11,9 @@ import {
   HealthEducationClient,
 } from "./ai/health-education.js";
 import createAuthRouter from "./routes/auth.js";
+import { createConversationsRouter } from "./routes/conversations.js";
 import educationRouter from "./routes/education.js";
+import { createFacilitiesRouter } from "./routes/facilities.js";
 
 // Handle unexpected errors without exposing internal details.
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
@@ -94,6 +96,8 @@ export function createApp(
   app.use(express.json({ limit: "10kb" }));
 
   app.use("/api/v1/education", educationRouter);
+  app.use("/api/v1/conversations", createConversationsRouter());
+  app.use("/api/v1/facilities", createFacilitiesRouter());
   app.use(
     "/api/v1/health-education",
     createHealthEducationRouter(healthEducationClient),

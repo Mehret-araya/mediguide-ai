@@ -98,6 +98,7 @@ describe("Supabase database foundation", () => {
         try {
           schema = await pool.query<{
             missing_objects: unknown;
+            missing_columns: unknown;
             missing_rls: unknown;
             invalid_ownership_policies: unknown;
             public_data_privileges: unknown;
@@ -115,6 +116,10 @@ describe("Supabase database foundation", () => {
                 ('approved_source_chunks'),
                 ('conversations'),
                 ('messages')
+            ),
+            expected_columns(table_name, column_name) AS (
+              VALUES
+                ('messages', 'limitations')
             ),
             expected_rls(table_name) AS (
               VALUES
@@ -139,6 +144,7 @@ describe("Supabase database foundation", () => {
                 ('conversations', 'conversations_update_own', 'UPDATE', 'user_id'),
                 ('conversations', 'conversations_delete_own', 'DELETE', 'user_id'),
                 ('messages', 'messages_select_own_conversation', 'SELECT', 'conversation_id'),
+                ('messages', 'messages_insert_own_conversation', 'INSERT', 'conversation_id'),
                 ('messages', 'messages_delete_own_conversation', 'DELETE', 'conversation_id')
             ),
             private_relations(relation_name) AS (
@@ -187,6 +193,23 @@ describe("Supabase database foundation", () => {
                 WHERE to_regtype('extensions.vector') IS NULL
                 ORDER BY 1
               )) AS missing_objects,
+              to_json(ARRAY(
+                SELECT format(
+                  'public.%s.%s',
+                  expected.table_name,
+                  expected.column_name
+                )
+                FROM expected_columns AS expected
+                WHERE NOT EXISTS (
+                  SELECT 1
+                  FROM pg_attribute AS attribute
+                  WHERE attribute.attrelid =
+                        to_regclass(format('public.%I', expected.table_name))
+                    AND attribute.attname = expected.column_name
+                    AND NOT attribute.attisdropped
+                )
+                ORDER BY expected.table_name, expected.column_name
+              )) AS missing_columns,
               to_json(ARRAY(
                 SELECT expected.table_name
                 FROM expected_rls AS expected
@@ -299,6 +322,10 @@ describe("Supabase database foundation", () => {
             row.missing_objects,
             "missing_objects",
           ),
+          missing_columns: normalizeStringArray(
+            row.missing_columns,
+            "missing_columns",
+          ),
           missing_rls: normalizeStringArray(row.missing_rls, "missing_rls"),
           invalid_ownership_policies: normalizeStringArray(
             row.invalid_ownership_policies,
@@ -320,6 +347,9 @@ describe("Supabase database foundation", () => {
         const failures = [
           ...(checks.missing_objects.length > 0
             ? [`missing objects: ${checks.missing_objects.join(", ")}`]
+            : []),
+          ...(checks.missing_columns.length > 0
+            ? [`missing columns: ${checks.missing_columns.join(", ")}`]
             : []),
           ...(checks.missing_rls.length > 0
             ? [`RLS is disabled on: ${checks.missing_rls.join(", ")}`]
@@ -392,6 +422,8 @@ describe("Supabase row-level security isolation", () => {
       const conversationB = randomUUID();
       const messageA = randomUUID();
       const messageB = randomUUID();
+      const ownerInsertedMessage = randomUUID();
+      const crossUserInsertedMessage = randomUUID();
 
       try {
         const client = await pool.connect();
@@ -469,6 +501,10 @@ describe("Supabase row-level security isolation", () => {
                WHERE id = $1`,
               [conversationId],
             );
+            const conversationDelete = await client.query(
+              "DELETE FROM public.conversations WHERE id = $1",
+              [conversationId],
+            );
             const messageDelete = await client.query(
               "DELETE FROM public.messages WHERE id = $1",
               [messageId],
@@ -477,11 +513,46 @@ describe("Supabase row-level security isolation", () => {
             if (
               profileUpdate.rowCount !== 0 ||
               conversationUpdate.rowCount !== 0 ||
+              conversationDelete.rowCount !== 0 ||
               messageDelete.rowCount !== 0
             ) {
               throw new Error(
                 "RLS allowed a user to modify another user's records.",
               );
+            }
+          };
+
+          const expectPermissionDenied = async (
+            operation: () => Promise<{ rowCount: number | null }>,
+            description: string,
+          ): Promise<void> => {
+            await client.query("SAVEPOINT rls_permission_check");
+            let denied = false;
+            try {
+              const result = await operation();
+              if (result.rowCount === 0) {
+                denied = true;
+              }
+            } catch (error) {
+              const code =
+                typeof error === "object" &&
+                error !== null &&
+                "code" in error &&
+                typeof error.code === "string"
+                  ? error.code
+                  : undefined;
+              if (code === "42501") {
+                denied = true;
+              } else {
+                throw error;
+              }
+            } finally {
+              await client.query("ROLLBACK TO SAVEPOINT rls_permission_check");
+              await client.query("RELEASE SAVEPOINT rls_permission_check");
+            }
+
+            if (!denied) {
+              throw new Error(`RLS allowed a forbidden operation: ${description}.`);
             }
           };
 
@@ -493,6 +564,44 @@ describe("Supabase row-level security isolation", () => {
           await expectVisible("messages", messageA, true);
           await expectVisible("messages", messageB, false);
           await expectNoCrossUserWrites(userB.id, conversationB, messageB);
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `INSERT INTO public.messages
+                   (id, conversation_id, role, content)
+                 VALUES ($1, $2, 'user', 'Cross-user RLS fixture')`,
+                [crossUserInsertedMessage, conversationB],
+              ),
+            "inserting a message into another user's conversation",
+          );
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `UPDATE public.messages
+                 SET content = 'Unauthorized update'
+                 WHERE id = $1`,
+                [messageB],
+              ),
+            "updating another user's message",
+          );
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                "DELETE FROM public.user_profiles WHERE id = $1",
+                [userB.id],
+              ),
+            "deleting another user's profile",
+          );
+          const ownerMessage = await client.query(
+            `INSERT INTO public.messages
+               (id, conversation_id, role, content)
+             VALUES ($1, $2, 'user', 'Owner RLS fixture')
+             RETURNING id`,
+            [ownerInsertedMessage, conversationA],
+          );
+          if (ownerMessage.rowCount !== 1) {
+            throw new Error("RLS denied a user inserting into their own conversation.");
+          }
 
           await setAuthenticatedUser(userB.id);
           await expectVisible("user_profiles", userB.id, true);
@@ -501,6 +610,8 @@ describe("Supabase row-level security isolation", () => {
           await expectVisible("conversations", conversationA, false);
           await expectVisible("messages", messageB, true);
           await expectVisible("messages", messageA, false);
+          await expectVisible("messages", ownerInsertedMessage, false);
+          await expectVisible("messages", crossUserInsertedMessage, false);
           await expectNoCrossUserWrites(userA.id, conversationA, messageA);
         } finally {
           try {

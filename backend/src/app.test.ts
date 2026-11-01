@@ -74,6 +74,21 @@ describe("MediGuide AI API", () => {
     expect(response.body.code).toBe("VALIDATION_ERROR");
   });
 
+  it("protects persisted conversation routes with verified authentication", async () => {
+    const response = await request(app).get("/api/v1/conversations");
+
+    expect(response.status).toBe(401);
+    expect(response.body.code).toBe("UNAUTHORIZED");
+  });
+
+  it("fails closed when no verified facility directory is configured", async () => {
+    const response = await request(app).get("/api/v1/facilities");
+
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe("FACILITY_DATA_UNAVAILABLE");
+    expect(response.body.message).not.toContain("https://");
+  });
+
   it("returns 404 for an unknown API route", async () => {
     const response = await request(app).get("/api/v1/does-not-exist");
 

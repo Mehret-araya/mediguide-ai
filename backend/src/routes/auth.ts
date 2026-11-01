@@ -78,7 +78,7 @@ function usesCookieSession(req: Request): boolean {
   return getCookie(req, ACCESS_COOKIE) !== null;
 }
 
-function validateCookieMutationOrigin(
+export function validateCookieMutationOrigin(
   req: Request,
   res: Response,
 ): boolean {
