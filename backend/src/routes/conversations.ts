@@ -5,7 +5,9 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuthenticatedUser } from "../auth/require-auth.js";
+import { createServerSupabaseClient } from "../auth/server-supabase-client.js";
 import {
   HealthEducationClient,
   HealthEducationServiceError,
@@ -15,6 +17,7 @@ import { validateCookieMutationOrigin } from "./auth.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const IDEMPOTENCY_HEADER = "idempotency-key";
 
 interface ConversationRecord {
   id: string;
@@ -29,6 +32,7 @@ interface MessageRecord {
   citations: HealthEducationResponse["citations"];
   limitations: string[];
   created_at: string;
+  idempotency_key?: string | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -50,6 +54,11 @@ function sendDatabaseFailure(
 function getConversationId(request: Request): string | null {
   const id = request.params.id;
   return typeof id === "string" && UUID_PATTERN.test(id) ? id : null;
+}
+
+function getIdempotencyKey(request: Request): string | null {
+  const key = request.get(IDEMPOTENCY_HEADER);
+  return key && UUID_PATTERN.test(key) ? key : null;
 }
 
 function getQuestion(value: unknown): string | null {
@@ -95,6 +104,7 @@ export function createConversationsRouter(
   healthEducationClient: Pick<HealthEducationClient, "answer"> =
     new HealthEducationClient(),
   authenticate: RequestHandler = requireAuthenticatedUser(),
+  createPrivilegedClient: () => SupabaseClient = createServerSupabaseClient,
 ): Router {
   const router = Router();
   router.use((request, response, next) => {
@@ -232,7 +242,8 @@ export function createConversationsRouter(
   router.post("/:id/messages", async (request, response) => {
     const id = getConversationId(request);
     const question = getQuestion(request.body);
-    if (!id || !question) {
+    const idempotencyKey = getIdempotencyKey(request);
+    if (!id || !question || !idempotencyKey) {
       sendValidationError(response);
       return;
     }
@@ -263,7 +274,51 @@ export function createConversationsRouter(
         return;
       }
 
-      const requestId = randomUUID().replaceAll("-", "");
+      const existingResult = await supabase
+        .from("messages")
+        .select("id, role, content, citations, limitations, created_at, idempotency_key")
+        .eq("conversation_id", id)
+        .eq("idempotency_key", idempotencyKey)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true });
+
+      if (existingResult.error || !existingResult.data) {
+        sendDatabaseFailure(response, "check-idempotency");
+        return;
+      }
+
+      let savedMessages = existingResult.data as MessageRecord[];
+      const existingUserMessage = savedMessages.find(
+        (message) => message.role === "user",
+      );
+      let existingAssistantMessage = savedMessages.find(
+        (message) => message.role === "assistant",
+      );
+
+      if (existingUserMessage && existingUserMessage.content !== question) {
+        response.status(409).json({
+          status: "error",
+          code: "IDEMPOTENCY_KEY_REUSED",
+          message: "This request key has already been used for another question.",
+        });
+        return;
+      }
+
+      const requestId = idempotencyKey.replaceAll("-", "");
+      if (existingUserMessage && existingAssistantMessage) {
+        response.status(200).json({
+          status: "ok",
+          conversationId: id,
+          messages: savedMessages.map(({ idempotency_key: _key, ...message }) => message),
+          answer: existingAssistantMessage.content,
+          language: "en",
+          citations: existingAssistantMessage.citations,
+          limitations: existingAssistantMessage.limitations,
+          requestId,
+        });
+        return;
+      }
+
       let answer: HealthEducationResponse;
       try {
         answer = await healthEducationClient.answer(
@@ -294,48 +349,135 @@ export function createConversationsRouter(
         throw error;
       }
 
-      const questionTime = new Date();
-      const answerTime = new Date(
-        Math.max(Date.now(), questionTime.getTime() + 1),
-      );
-      const { data, error } = await supabase
-        .from("messages")
-        .insert([
-          {
+      if (!existingUserMessage) {
+        const questionTime = new Date();
+        const { error } = await supabase
+          .from("messages")
+          .insert({
+            id: randomUUID(),
             conversation_id: id,
             role: "user",
             content: question,
             limitations: [],
             created_at: questionTime.toISOString(),
-          },
-          {
+            idempotency_key: idempotencyKey,
+          });
+
+        if (error) {
+          const retryResult = await supabase
+            .from("messages")
+            .select("id, role, content, citations, limitations, created_at, idempotency_key")
+            .eq("conversation_id", id)
+            .eq("idempotency_key", idempotencyKey)
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true });
+          if (retryResult.error || !retryResult.data) {
+            sendDatabaseFailure(response, "save-user-message");
+            return;
+          }
+          savedMessages = retryResult.data as MessageRecord[];
+          const savedUserMessage = savedMessages.find(
+            (message) => message.role === "user",
+          );
+          if (!savedUserMessage || savedUserMessage.content !== question) {
+            sendDatabaseFailure(response, "save-user-message");
+            return;
+          }
+          existingAssistantMessage = savedMessages.find(
+            (message) => message.role === "assistant",
+          );
+          if (existingAssistantMessage) {
+            response.status(200).json({
+              status: "ok",
+              conversationId: id,
+              messages: savedMessages.map(({ idempotency_key: _key, ...message }) => message),
+              answer: existingAssistantMessage.content,
+              language: "en",
+              citations: existingAssistantMessage.citations,
+              limitations: existingAssistantMessage.limitations,
+              requestId,
+            });
+            return;
+          }
+        }
+      }
+
+      const questionMessage = savedMessages.find(
+        (message) => message.role === "user",
+      );
+      const questionTime = questionMessage
+        ? new Date(questionMessage.created_at)
+        : new Date();
+      const answerTime = new Date(
+        Math.max(Date.now(), questionTime.getTime() + 1),
+      );
+      const assistantMessageId = randomUUID();
+
+      try {
+        const privilegedClient = createPrivilegedClient();
+        const { error } = await privilegedClient
+          .from("messages")
+          .insert({
+            id: assistantMessageId,
             conversation_id: id,
             role: "assistant",
             content: answer.answer,
             citations: answer.citations,
             limitations: answer.limitations,
             created_at: answerTime.toISOString(),
-          },
-        ])
-        .select("id, role, content, citations, limitations, created_at");
+            idempotency_key: idempotencyKey,
+          });
 
-      if (error || !data) {
-        sendDatabaseFailure(response, "save-message");
+        if (error) {
+          const retryResult = await supabase
+            .from("messages")
+            .select("id, role, content, citations, limitations, created_at, idempotency_key")
+            .eq("conversation_id", id)
+            .eq("idempotency_key", idempotencyKey)
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true });
+          if (retryResult.error || !retryResult.data) {
+            sendDatabaseFailure(response, "save-assistant-message");
+            return;
+          }
+          savedMessages = retryResult.data as MessageRecord[];
+          existingAssistantMessage = savedMessages.find(
+            (message) => message.role === "assistant",
+          );
+          if (!existingAssistantMessage) {
+            sendDatabaseFailure(response, "save-assistant-message");
+            return;
+          }
+        }
+      } catch {
+        sendDatabaseFailure(response, "save-assistant-message");
         return;
       }
 
-      const savedMessages = (data as MessageRecord[]).sort((left, right) =>
+      const savedResult = await supabase
+        .from("messages")
+        .select("id, role, content, citations, limitations, created_at, idempotency_key")
+        .eq("conversation_id", id)
+        .eq("idempotency_key", idempotencyKey)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true });
+      if (savedResult.error || !savedResult.data) {
+        sendDatabaseFailure(response, "read-saved-messages");
+        return;
+      }
+
+      savedMessages = (savedResult.data as MessageRecord[]).sort((left, right) =>
         left.created_at.localeCompare(right.created_at),
       );
       response.status(200).json({
         status: "ok",
         conversationId: id,
-        messages: savedMessages,
-        answer: answer.answer,
-        language: answer.language,
-        citations: answer.citations,
-        limitations: answer.limitations,
-        requestId: answer.requestId,
+        messages: savedMessages.map(({ idempotency_key: _key, ...message }) => message),
+        answer: existingAssistantMessage?.content ?? answer.answer,
+        language: "en",
+        citations: existingAssistantMessage?.citations ?? answer.citations,
+        limitations: existingAssistantMessage?.limitations ?? answer.limitations,
+        requestId: answer.requestId ?? requestId,
       });
     } catch {
       sendDatabaseFailure(response, "send-message");
