@@ -67,6 +67,7 @@ describe('credentialed conversation API', () => {
     const response = await conversationsApi.sendMessage(
       'conversation/1',
       'What is general health information?',
+      '10ec58c4-26b8-4efb-8501-2610e35b76f8',
     )
 
     expect(response.limitations).toEqual(['General information only.'])
@@ -79,7 +80,10 @@ describe('credentialed conversation API', () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': '10ec58c4-26b8-4efb-8501-2610e35b76f8',
+      },
     })
   })
 

@@ -167,6 +167,7 @@ describe('site authentication navigation', () => {
     expect(conversationsApi.sendMessage).toHaveBeenCalledWith(
       'conversation-1',
       'What is general health information?',
+      expect.any(String),
     )
 
     fireEvent.click(
@@ -216,6 +217,7 @@ describe('site authentication navigation', () => {
       expect(conversationsApi.sendMessage).toHaveBeenCalledWith(
         'conversation-user-a',
         'A private question',
+        expect.any(String),
       )
     })
 

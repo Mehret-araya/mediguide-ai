@@ -219,14 +219,24 @@ function App() {
   const [historyError, setHistoryError] = useState('')
   const [historyOwnerId, setHistoryOwnerId] = useState<string | null>(null)
   const authenticatedUserIdRef = useRef<string | null>(null)
+  const pendingMessageRef = useRef<{
+    userId: string
+    conversationId: string
+    question: string
+    idempotencyKey: string
+  } | null>(null)
   const assistantLoading =
     status === 'authenticated' &&
     user?.id !== undefined &&
     assistantLoadingUserId === user.id
 
   useLayoutEffect(() => {
-    authenticatedUserIdRef.current =
+    const nextUserId =
       status === 'authenticated' ? user?.id ?? null : null
+    if (authenticatedUserIdRef.current !== nextUserId) {
+      pendingMessageRef.current = null
+    }
+    authenticatedUserIdRef.current = nextUserId
   }, [status, user?.id])
 
   useEffect(() => {
@@ -361,6 +371,7 @@ function App() {
     }
 
     const requestUserId = user.id
+    const submittedQuestion = question.trim()
     setAssistantLoadingUserId(requestUserId)
     setAssistantNotice('')
     try {
@@ -374,15 +385,34 @@ function App() {
         if (authenticatedUserIdRef.current !== requestUserId) return
         conversationId = created.id
         conversationCreatedAt = created.created_at
+        setActiveConversationId(created.id)
+        setHistoryOwnerId(requestUserId)
         setConversations((current) => [created, ...current])
       }
 
       const targetConversationId = conversationId
+      const pendingMessage = pendingMessageRef.current
+      const idempotencyKey =
+        pendingMessage?.userId === requestUserId &&
+        pendingMessage.question === submittedQuestion &&
+        pendingMessage.conversationId === targetConversationId
+          ? pendingMessage.idempotencyKey
+          : crypto.randomUUID()
+      pendingMessageRef.current = {
+        userId: requestUserId,
+        conversationId: targetConversationId,
+        question: submittedQuestion,
+        idempotencyKey,
+      }
       const result = await conversationsApi.sendMessage(
         targetConversationId,
-        question.trim(),
+        submittedQuestion,
+        idempotencyKey,
       )
       if (authenticatedUserIdRef.current !== requestUserId) return
+      if (pendingMessageRef.current?.idempotencyKey === idempotencyKey) {
+        pendingMessageRef.current = null
+      }
       setActiveConversationId(targetConversationId)
       setMessages((current) =>
         activeConversationId === targetConversationId &&

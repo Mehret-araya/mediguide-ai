@@ -253,6 +253,7 @@ export const conversationsApi = {
   async sendMessage(
     id: string,
     question: string,
+    idempotencyKey: string,
   ): Promise<{
     conversationId: string
     messages: ConversationMessage[]
@@ -265,6 +266,7 @@ export const conversationsApi = {
       `/api/v1/conversations/${encodeURIComponent(id)}/messages`,
       {
         method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({ question, language: 'en' }),
       },
     )
