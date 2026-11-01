@@ -8,17 +8,19 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const ACCESS_COOKIE = "mediguide_access";
 const REFRESH_COOKIE = "mediguide_refresh";
 const REFRESH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
+const ACCESS_COOKIE_PATH = "/api/v1";
+const REFRESH_COOKIE_PATH = "/api/v1/auth";
 
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
-function cookieOptions(maxAge?: number) {
+function cookieOptions(path: string, maxAge?: number) {
   return {
     httpOnly: true,
     secure: isProduction(),
     sameSite: "lax" as const,
-    path: "/api/v1/auth",
+    path,
     ...(maxAge === undefined ? {} : { maxAge }),
   };
 }
@@ -99,18 +101,18 @@ function setSessionCookies(
   res.cookie(
     ACCESS_COOKIE,
     session.accessToken,
-    cookieOptions(session.expiresIn * 1000),
+    cookieOptions(ACCESS_COOKIE_PATH, session.expiresIn * 1000),
   );
   res.cookie(
     REFRESH_COOKIE,
     session.refreshToken,
-    cookieOptions(REFRESH_COOKIE_MAX_AGE),
+    cookieOptions(REFRESH_COOKIE_PATH, REFRESH_COOKIE_MAX_AGE),
   );
 }
 
 function clearSessionCookies(res: Response): void {
-  res.clearCookie(ACCESS_COOKIE, cookieOptions());
-  res.clearCookie(REFRESH_COOKIE, cookieOptions());
+  res.clearCookie(ACCESS_COOKIE, cookieOptions(ACCESS_COOKIE_PATH));
+  res.clearCookie(REFRESH_COOKIE, cookieOptions(REFRESH_COOKIE_PATH));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

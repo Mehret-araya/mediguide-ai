@@ -25,6 +25,19 @@ describe("PostgreSQL pool configuration", () => {
     expect(config.connectionTimeoutMillis).toBe(10000);
   });
 
+  it.each([
+    "postgresql://localhost/mediguide?sslmode=disable",
+    "postgresql://localhost/mediguide?ssl=no-verify",
+    "postgresql://localhost/mediguide?sslrootcert=ca.pem",
+    "host=localhost dbname=mediguide sslmode=disable",
+  ])("rejects TLS options embedded in DATABASE_URL (%s)", (databaseUrl) => {
+    expect(() =>
+      createDatabasePoolConfig({ DATABASE_URL: databaseUrl }),
+    ).toThrow(
+      "Remove TLS parameters from DATABASE_URL and configure PostgreSQL TLS with DATABASE_SSL and DATABASE_SSL_CA.",
+    );
+  });
+
   it("allows explicit non-TLS configuration for local development", () => {
     const config = createDatabasePoolConfig({
       DATABASE_URL: "postgresql://localhost/mediguide",

@@ -64,9 +64,11 @@ The repository includes an Express backend with Supabase Auth registration,
 login, token refresh, logout, current-user lookup, and authenticated account
 deletion routes. It also includes PostgreSQL connection configuration, a
 source-review foundation, a responsive website with Supabase Auth flows, and
-a FastAPI AI-service health endpoint. RAG answers, database migrations,
-conversation history, verified facility data, and clinically reviewed
-emergency rules are not yet implemented.
+a FastAPI AI service with source-gated local ingestion, lexical retrieval, and
+extractive answering. No approved production documents are configured, so the
+AI service abstains by default; it has no configured embedding model, pgvector
+adapter, or LLM. Database migrations, conversation history, verified facility
+data, and clinically reviewed emergency rules are not yet implemented.
 
 ### Backend authentication setup
 
@@ -90,6 +92,15 @@ Deploy the frontend and API on the same site so the `SameSite=Lax` session
 cookies are sent by the browser. The frontend configuration must never contain
 Supabase keys. Run the frontend from `frontend/` with `npm run dev`.
 
+The Express API also exposes `POST /api/v1/health-education` as a proxy to the
+private FastAPI service. Configure the same privately generated
+`AI_SERVICE_TOKEN` in `backend/.env` and `ai-service/.env`, and set the trusted
+backend-only `AI_SERVICE_URL`. Do not put these values in frontend settings.
+FastAPI rejects requests without the shared token; in production, use HTTPS
+and restrict AI-service network access to the backend. No live deployment
+integration or production source corpus has been verified; the AI service
+abstains when no approved documents are configured.
+
 ### Backend development configuration
 
 From the repository root, copy `backend/.env.example` to `backend/.env` and
@@ -104,9 +115,43 @@ for a hosted database. Set `DATABASE_SSL=false` only for local development
 databases that do not support TLS. Never commit `.env` or put real credentials
 in the example file.
 
+### Supabase schema migrations
+
+The Supabase migrations create profiles linked to Supabase Auth users, reviewed
+health sources and an append-only review history, source chunks with optional
+pgvector embeddings, and private conversations/messages. Row-level security
+restricts profile and conversation access to the owning authenticated user;
+authenticated users can select or delete only messages in their own
+conversations, and anonymous users have no table/view privileges. The
+`service_role` has no direct privileges on profiles, conversations, or
+messages. Message insertion is intentionally not granted yet; add a
+separately reviewed owner-scoped API or database operation before enabling it.
+Source retrieval is exposed only through views that require a matching latest
+approval event. Any database role with RLS-bypass privileges must still be
+treated as privileged and kept out of public clients.
+
+After authenticating the Supabase CLI and linking the intended project, apply
+the tracked migrations with `npx supabase db push` from the repository root.
+Review the target project and migration SQL before applying. Do not run these
+migrations against production until backups and a rollback plan are in place.
+
+For a live connection and migrated-schema check, configure `DATABASE_URL` and
+the official dashboard CA path in `backend/.env`, then, from `backend/`, run
+these PowerShell commands:
+
+```powershell
+$env:RUN_DATABASE_INTEGRATION = "true"
+npm run test:database
+Remove-Item Env:RUN_DATABASE_INTEGRATION
+```
+
+The opt-in test runs `SELECT 1` and checks the expected tables, pgvector type,
+and row-level security. It is not a substitute for authorization tests using
+real authenticated database roles.
+
 Run the backend from its directory with `npm run dev`. Its `/health` endpoint
 checks the API process only; live PostgreSQL connectivity is a separate
-dependency check. It could not be verified in this environment because the
-configured Supabase database presented a certificate chain Node.js does not
-trust (`SELF_SIGNED_CERT_IN_CHAIN`). Its CA must be configured using
-`DATABASE_SSL_CA` before a verified database query can succeed.
+dependency check. The project reports that verified database connectivity now
+works, but the schema migration has not yet been confirmed on the hosted
+project. The opt-in test above verifies both connectivity and migration state;
+it never applies the migration.

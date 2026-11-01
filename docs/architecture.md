@@ -118,7 +118,9 @@ The application must not claim to rule out an emergency or guarantee that a user
 - Supabase Auth manages account identities and password storage. The backend
   validates bearer tokens with Supabase Auth and keeps its service-role key
   server-side.
-- The AI service accepts requests only through a controlled server-to-server interface.
+- The Express API calls the private FastAPI service over a configured
+  server-to-server URL using a shared secret header; browser clients never
+  receive this secret. Production requires HTTPS and network isolation.
 - Database credentials remain server-side.
 - Secrets are supplied through environment configuration and excluded from Git.
 - Private conversation data must not be accessible to other users.
@@ -151,14 +153,25 @@ configuration that verifies TLS certificates by default, Supabase Auth API
 routes, and a FastAPI AI-service process-health endpoint. Auth supports
 registration, login, refresh, logout, current-user lookup, and authenticated
 account deletion. Both API processes start locally and their health endpoints
-respond. PostgreSQL connectivity could not be verified in
-the current environment because the configured database presents an
-untrusted certificate chain (`SELF_SIGNED_CERT_IN_CHAIN`). The backend
-supports a trusted Supabase CA file through `DATABASE_SSL_CA`; certificate
-verification must not be disabled for the hosted database. Auth routes have
+respond. The project reports that PostgreSQL connectivity now succeeds with
+verified TLS; it was not re-tested against the live database during this
+change. The backend supports a trusted Supabase CA file through
+`DATABASE_SSL_CA`; certificate verification must not be disabled for the
+hosted database. Auth routes have
 automated mocked-provider tests, and the website uses HttpOnly-cookie auth
 flows, but no live Supabase Auth configuration was available for integration
-testing. Database migrations, conversation persistence, retrieval, answer
-generation, clinical safeguards, and production deployment remain
-unimplemented. This document does not mean that the services have been
-clinically validated or deployed.
+testing. The AI service now has source-gated local document ingestion,
+BM25-style lexical retrieval, and an extractive response path. No approved
+production sources are loaded; the default service abstains. An embedding
+provider, Supabase pgvector retrieval adapter, and persistent application-level
+knowledge ingestion remain unimplemented. The repository now has a Supabase
+migration foundation for auth-linked profiles, source approval history, source
+chunks with optional pgvector embeddings, and owner-scoped conversations and
+messages with RLS. These migrations have not been applied or tested against
+the hosted project. The project reports the migration failed while creating a
+vector index on a dimensionless vector column; the database still lacks the
+expected migrated objects. This change corrects that migration but does not
+apply or live-test it.
+Clinical validation, deterministic emergency safeguards, and production
+deployment also remain outstanding. This document does not mean that the
+services have been clinically validated or deployed.

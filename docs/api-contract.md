@@ -133,17 +133,23 @@ Authentication errors currently use `{ "status": "error", "code": "...",
 
 ## 5. Health Information and General Education
 
-### A. Planned health-question endpoint
+### A. Internal AI-service health-education route
 
-#### POST /api/v1/health-questions
+#### POST /api/v1/health-education
 
-**Implementation status: Planned; not yet implemented.**
+**Implementation status: Express proxy and internal FastAPI foundation
+implemented; no live deployment integration has been verified.**
 
-Purpose: Submit a question for general health education.
+Purpose: Return general educational source passages for a question when
+relevant approved chunks are available.
 
-Authentication: Required in the initial design.
+The public Express route is `POST /api/v1/health-education`. It validates the
+request and forwards it to the private FastAPI service. The FastAPI route is
+not a browser API: it requires the shared `AI_SERVICE_TOKEN` in the
+`X-Internal-Service-Token` header and should also be network-restricted behind
+the Express backend. The backend never returns the shared token.
 
-Proposed request:
+Request:
 
 ```json
 {
@@ -152,16 +158,13 @@ Proposed request:
 }
 ```
 
-Supported initial language values:
-
-- `en`: English.
-- `am`: Amharic interface preference.
-
-For version 1, AI-generated answers are planned to be in English. An Amharic interface preference must not be interpreted as evidence that Amharic medical responses have been validated.
+The current FastAPI implementation accepts English (`en`) only. An Amharic
+interface preference must not be interpreted as evidence that Amharic medical
+responses have been validated.
 
 Expected success: `200 OK`.
 
-Proposed response:
+Response:
 
 ```json
 {
@@ -183,9 +186,31 @@ Proposed response:
 }
 ```
 
-The response above is illustrative. Production responses must use real, approved source records retrieved and verified for the answer. Example URLs and placeholder citations must never be presented as real medical evidence.
+Answers are extractive: selected sentences are copied from retrieved chunks,
+and citation metadata is carried from the corresponding source record. The
+route refuses individual diagnosis and medication/dose recommendation
+requests. When no relevant approved passage is available, it returns an
+abstention with no citations. No approved production documents are currently
+loaded, so the default runtime abstains. Example URLs and placeholder
+citations above are schema illustrations only.
 
-Before implementation, the backend must validate request size, question content, authentication, usage limits, and AI-service availability.
+The Express proxy and FastAPI route both validate the question and English-only
+language. The backend forwards a server-generated request ID in
+`X-Request-ID`; the AI service echoes the validated ID in the response body
+and response header. The backend validates that ID and the response/citation
+shape before returning it.
+
+The backend uses `AI_SERVICE_URL` and `AI_SERVICE_TOKEN` from its trusted
+environment. It permits HTTPS service URLs; HTTP is allowed only for loopback
+development addresses. Requests have an eight-second timeout, redirects are
+rejected, and failures return generic 502/503/504 responses without exposing
+the internal URL, token, or upstream error body. Configure the same privately
+generated token as `AI_SERVICE_TOKEN` in both the backend and AI-service
+environments. Do not put this token in frontend configuration.
+
+The route remains an unverified integration against any live deployment.
+Authentication/usage limits for health-question submissions and complete
+service deployment/network controls remain outstanding.
 
 The response must not imply that a diagnosis was established or that an emergency was ruled out.
 

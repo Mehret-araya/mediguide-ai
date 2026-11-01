@@ -1,4 +1,3 @@
-
 import "dotenv/config";
 import cors from "cors";
 import express, {
@@ -7,58 +6,12 @@ import express, {
   type Response,
 } from "express";
 import helmet from "helmet";
+import {
+  createHealthEducationRouter,
+  HealthEducationClient,
+} from "./ai/health-education.js";
 import createAuthRouter from "./routes/auth.js";
 import educationRouter from "./routes/education.js";
-
-const app = express();
-
-// Configure which frontend origins may call this API.
-const allowedOrigins = (
-  process.env.FRONTEND_URL || "http://localhost:5173"
-)
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
-app.use(helmet());
-
-app.use(
-  cors({
-    credentials: true,
-    origin(origin, callback) {
-      // Allow requests without an Origin header, such as local command-line tests.
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error("Origin not allowed by CORS"));
-    },
-  }),
-);
-
-app.use(express.json({ limit: "10kb" }));
-
-// Versioned general health education endpoints.
-app.use("/api/v1/education", educationRouter);
-app.use("/api/v1/auth", createAuthRouter());
-
-// Process health check. This does not verify dependency readiness.
-app.get("/health", (_req: Request, res: Response) => {
-  res.status(200).json({
-    status: "ok",
-    service: "MediGuide AI backend",
-    message: "Backend server is running.",
-  });
-});
-
-// Return a consistent JSON response for unknown routes.
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({
-    status: "error",
-    message: "The requested endpoint was not found.",
-  });
-});
 
 // Handle unexpected errors without exposing internal details.
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
@@ -110,6 +63,63 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   });
 };
 
-app.use(errorHandler);
+export function createApp(
+  healthEducationClient = new HealthEducationClient(),
+) {
+  const app = express();
+
+  const allowedOrigins = (
+    process.env.FRONTEND_URL || "http://localhost:5173"
+  )
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  app.use(helmet());
+
+  app.use(
+    cors({
+      credentials: true,
+      origin(origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+
+        callback(new Error("Origin not allowed by CORS"));
+      },
+    }),
+  );
+
+  app.use(express.json({ limit: "10kb" }));
+
+  app.use("/api/v1/education", educationRouter);
+  app.use(
+    "/api/v1/health-education",
+    createHealthEducationRouter(healthEducationClient),
+  );
+  app.use("/api/v1/auth", createAuthRouter());
+
+  app.get("/health", (_req: Request, res: Response) => {
+    res.status(200).json({
+      status: "ok",
+      service: "MediGuide AI backend",
+      message: "Backend server is running.",
+    });
+  });
+
+  app.use((_req: Request, res: Response) => {
+    res.status(404).json({
+      status: "error",
+      message: "The requested endpoint was not found.",
+    });
+  });
+
+  app.use(errorHandler);
+
+  return app;
+}
+
+const app = createApp();
 
 export default app;

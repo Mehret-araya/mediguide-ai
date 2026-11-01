@@ -7,6 +7,31 @@ export interface DatabaseEnvironment {
   DATABASE_SSL_CA?: string;
 }
 
+const CONNECTION_STRING_TLS_PARAMETERS = [
+  "ssl",
+  "sslmode",
+  "sslcert",
+  "sslkey",
+  "sslrootcert",
+  "sslnegotiation",
+  "uselibpqcompat",
+];
+
+function connectionStringHasTlsParameters(connectionString: string): boolean {
+  try {
+    const url = new URL(connectionString);
+    return CONNECTION_STRING_TLS_PARAMETERS.some((parameter) =>
+      url.searchParams.has(parameter),
+    );
+  } catch {
+    const tlsParameterPattern = new RegExp(
+      `(?:^|\\s)(?:${CONNECTION_STRING_TLS_PARAMETERS.join("|")})\\s*=`,
+      "iu",
+    );
+    return tlsParameterPattern.test(connectionString);
+  }
+}
+
 export function createDatabasePoolConfig(
   environment: DatabaseEnvironment,
 ): PoolConfig {
@@ -14,6 +39,12 @@ export function createDatabasePoolConfig(
 
   if (!connectionString) {
     throw new Error("DATABASE_URL must be configured for PostgreSQL access.");
+  }
+
+  if (connectionStringHasTlsParameters(connectionString)) {
+    throw new Error(
+      "Remove TLS parameters from DATABASE_URL and configure PostgreSQL TLS with DATABASE_SSL and DATABASE_SSL_CA.",
+    );
   }
 
   const sslSetting = (environment.DATABASE_SSL ?? "true")

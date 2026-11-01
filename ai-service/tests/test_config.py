@@ -7,7 +7,15 @@ from app.core.config import Settings
 
 
 def test_settings_use_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("APP_NAME", "APP_VERSION", "APP_ENV", "DEBUG", "LOG_LEVEL"):
+    for name in (
+        "APP_NAME",
+        "APP_VERSION",
+        "APP_ENV",
+        "DEBUG",
+        "LOG_LEVEL",
+        "KNOWLEDGE_BASE_MANIFEST",
+        "AI_SERVICE_TOKEN",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     settings = Settings(_env_file=None)
@@ -35,6 +43,30 @@ def test_settings_load_environment_variables(
     assert settings.app_env == "testing"
     assert settings.debug is True
     assert settings.log_level == "DEBUG"
+
+
+def test_settings_loads_optional_knowledge_base_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "approved-sources.json"
+    monkeypatch.setenv("KNOWLEDGE_BASE_MANIFEST", str(manifest))
+
+    settings = Settings(_env_file=None)
+
+    assert settings.knowledge_base_manifest == manifest
+
+
+def test_settings_loads_internal_service_token_without_revealing_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_SERVICE_TOKEN", "test-internal-token")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ai_service_token is not None
+    assert settings.ai_service_token.get_secret_value() == "test-internal-token"
+    assert "test-internal-token" not in repr(settings)
 
 
 def test_settings_load_optional_env_file(tmp_path: Path) -> None:

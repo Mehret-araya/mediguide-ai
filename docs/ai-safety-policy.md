@@ -7,7 +7,9 @@ This policy defines how MediGuide AI should handle health-related questions, unc
 
 MediGuide AI is intended for general health education and support in finding appropriate next steps. It is not a substitute for professional medical care.
 
-This policy describes planned behavior. It does not mean that safety controls have been implemented, tested, or clinically validated.
+This policy defines required behavior. Some source-approval, abstention, and
+non-diagnosis controls are implemented and tested, but the policy as a whole
+has not been clinically reviewed or validated.
 
 ## 2. Core Safety Principles
 

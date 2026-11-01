@@ -135,13 +135,21 @@ describe("Supabase-backed authentication routes", () => {
     expect(response.text).not.toContain(session.accessToken);
     expect(response.text).not.toContain(session.refreshToken);
     expect(response.text).not.toContain("test-service-role-key");
-    const cookies = JSON.stringify(response.headers["set-cookie"]);
-    expect(cookies.match(/mediguide_(?:access|refresh)=/gu)).toHaveLength(2);
-    expect(cookies).toContain("mediguide_access=");
-    expect(cookies.toLowerCase()).toContain("httponly");
-    expect(cookies.toLowerCase()).toContain("samesite=lax");
-    expect(cookies).toContain("Path=/api/v1/auth");
-    expect(cookies).toContain("mediguide_refresh=");
+    const setCookieHeader = response.headers["set-cookie"];
+    const cookies = Array.isArray(setCookieHeader)
+      ? setCookieHeader
+      : [setCookieHeader];
+    expect(cookies).toHaveLength(2);
+    const accessCookie = cookies.find((cookie) =>
+      cookie.startsWith("mediguide_access="),
+    );
+    const refreshCookie = cookies.find((cookie) =>
+      cookie.startsWith("mediguide_refresh="),
+    );
+    expect(accessCookie).toContain("Path=/api/v1;");
+    expect(refreshCookie).toContain("Path=/api/v1/auth;");
+    expect(cookies.every((cookie) => /httponly/iu.test(cookie))).toBe(true);
+    expect(cookies.every((cookie) => /samesite=lax/iu.test(cookie))).toBe(true);
 
     const [url, options] = fetcher.mock.calls[0];
     expect(url.toString()).toContain(
