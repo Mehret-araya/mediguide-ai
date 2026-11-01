@@ -146,8 +146,30 @@ Remove-Item Env:RUN_DATABASE_INTEGRATION
 ```
 
 The opt-in test runs `SELECT 1` and checks the expected tables, pgvector type,
-and row-level security. It is not a substitute for authorization tests using
-real authenticated database roles.
+and row-level security. It does not apply the migration.
+
+To run the separate two-user RLS behavior test, create or use two dedicated
+Supabase test accounts, then set their valid access tokens in the temporary
+process environment as `RLS_TEST_USER_A_ACCESS_TOKEN` and
+`RLS_TEST_USER_B_ACCESS_TOKEN`. Configure `SUPABASE_URL`,
+`SUPABASE_ANON_KEY`, `DATABASE_URL`, and verified TLS settings as above. From
+`backend/`, enable only this opt-in test and run:
+
+```powershell
+$env:RUN_DATABASE_RLS_INTEGRATION = "true"
+npm run test:database
+Remove-Item Env:RUN_DATABASE_RLS_INTEGRATION
+Remove-Item Env:RLS_TEST_USER_A_ACCESS_TOKEN
+Remove-Item Env:RLS_TEST_USER_B_ACCESS_TOKEN
+```
+
+The test verifies both tokens with Supabase Auth, temporarily creates fixture
+profiles, conversations, and messages inside a PostgreSQL transaction, then
+checks each user's read and write isolation under the `authenticated` role.
+All fixture writes are rolled back. It requires the configured database role
+to be able to assume `authenticated`; it does not apply migrations or use
+service-role credentials. Do not use production accounts or expose access
+tokens in shell history or logs.
 
 Run the backend from its directory with `npm run dev`. Its `/health` endpoint
 checks the API process only; live PostgreSQL connectivity is a separate
