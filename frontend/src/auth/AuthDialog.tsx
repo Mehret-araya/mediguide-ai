@@ -155,8 +155,9 @@ export function AuthDialog({ onClose }: AuthDialogProps) {
             <span className="section-kicker">ACCOUNT REMOVED</span>
             <h2 id="auth-dialog-title">Your account was deleted.</h2>
             <p id="auth-dialog-description">
-              Your Supabase Auth identity has been removed. There is no saved
-              conversation history in this prototype.
+              Your Supabase Auth identity has been removed. Saved profile and
+              conversation records are removed through configured database
+              cascades; backup retention may follow a separate schedule.
             </p>
             <button className="button button-primary dialog-action" type="button" onClick={onClose}>
               Close
@@ -179,7 +180,8 @@ export function AuthDialog({ onClose }: AuthDialogProps) {
               Signed in as <strong>{user.email}</strong>
             </p>
             <p className="auth-history-note">
-              Conversation history is not available yet. Nothing is saved here.
+              Your conversations are private to your account. Manage them under
+              My history.
             </p>
             {error && <p className="auth-feedback auth-feedback-error" role="alert">{error}</p>}
             <div className="auth-account-actions">
@@ -250,8 +252,8 @@ export function AuthDialog({ onClose }: AuthDialogProps) {
               {mode === 'login' ? 'Welcome back.' : 'Create your account.'}
             </h2>
             <p id="auth-dialog-description">
-              Your account keeps your access secure. Health conversations are
-              not saved in this prototype.
+              Your account keeps your access secure. Saved conversations are
+              private to your account and can be deleted from your history.
             </p>
 
             {status === 'unavailable' && (
