@@ -167,13 +167,23 @@ Test results must be recorded. Do not claim that retrieval or citation accuracy 
 The backend contains a source registry and review workflow. The AI service
 contains an ingestion path that enforces the registry's approval status and
 approval audit evidence, verifies an optional content checksum, and preserves
-source metadata and section headings on text chunks. It accepts operator-
-supplied text; it does not fetch documents, approve sources, or persist the
-result.
+the full source record, approval event, citation metadata, and section
+headings on text chunks. An optional local manifest can load operator-supplied
+Markdown or plain text at service startup; the loader does not fetch documents,
+approve sources, or persist chunks to a database.
+
+The AI service has BM25-style local lexical retrieval and returns selected
+sentences verbatim with citation metadata carried by the retrieved chunks. It
+abstains when no relevant passage is found. Embedding-provider and vector-store
+interfaces are present, with an in-memory vector implementation for tests,
+but no embedding model or Supabase pgvector adapter is configured. The current
+service does not persist chunks between restarts.
 
 No production source documents or approval records are currently available to
-the AI service. Retrieval, answer generation, persistent chunk storage, and
-end-to-end citation evaluation remain unimplemented. No source should be
-considered approved merely because this policy or test fixtures exist, and the
-project must not claim to provide verified, evidence-grounded answers until
-those remaining controls are implemented and evaluated.
+the AI service, so its default runtime abstains. The response path is
+extractive, not LLM-generated, and has not been clinically or retrieval-
+quality validated. Persistent storage, a configured embedding implementation,
+end-to-end citation evaluation, and clinical review remain outstanding. No
+source should be considered approved merely because this policy or test
+fixtures exist, and the project must not claim to provide a clinically
+validated service.

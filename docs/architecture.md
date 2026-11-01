@@ -158,7 +158,11 @@ supports a trusted Supabase CA file through `DATABASE_SSL_CA`; certificate
 verification must not be disabled for the hosted database. Auth routes have
 automated mocked-provider tests, and the website uses HttpOnly-cookie auth
 flows, but no live Supabase Auth configuration was available for integration
-testing. Database migrations, conversation persistence, retrieval, answer
-generation, clinical safeguards, and production deployment remain
-unimplemented. This document does not mean that the services have been
+testing. The AI service now has source-gated local document ingestion,
+BM25-style lexical retrieval, and an extractive response path. No approved
+production sources are loaded; the default service abstains. An embedding
+provider, Supabase pgvector adapter, persistent knowledge storage, and
+Express-to-AI-service integration remain unimplemented. Clinical validation,
+deterministic emergency safeguards, and production deployment also remain
+outstanding. This document does not mean that the services have been
 clinically validated or deployed.

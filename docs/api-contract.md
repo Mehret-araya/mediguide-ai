@@ -133,17 +133,21 @@ Authentication errors currently use `{ "status": "error", "code": "...",
 
 ## 5. Health Information and General Education
 
-### A. Planned health-question endpoint
+### A. Internal AI-service health-education route
 
-#### POST /api/v1/health-questions
+#### POST /api/v1/health-education
 
-**Implementation status: Planned; not yet implemented.**
+**Implementation status: Foundation implemented in FastAPI; not connected to
+the public Express API.**
 
-Purpose: Submit a question for general health education.
+Purpose: Return general educational source passages for a question when
+relevant approved chunks are available.
 
-Authentication: Required in the initial design.
+Authentication: No route-level authentication. This service is internal and
+must be network-restricted behind the backend; it must not be exposed directly
+to frontend clients.
 
-Proposed request:
+Request:
 
 ```json
 {
@@ -152,16 +156,13 @@ Proposed request:
 }
 ```
 
-Supported initial language values:
-
-- `en`: English.
-- `am`: Amharic interface preference.
-
-For version 1, AI-generated answers are planned to be in English. An Amharic interface preference must not be interpreted as evidence that Amharic medical responses have been validated.
+The current FastAPI implementation accepts English (`en`) only. An Amharic
+interface preference must not be interpreted as evidence that Amharic medical
+responses have been validated.
 
 Expected success: `200 OK`.
 
-Proposed response:
+Response:
 
 ```json
 {
@@ -183,9 +184,17 @@ Proposed response:
 }
 ```
 
-The response above is illustrative. Production responses must use real, approved source records retrieved and verified for the answer. Example URLs and placeholder citations must never be presented as real medical evidence.
+Answers are extractive: selected sentences are copied from retrieved chunks,
+and citation metadata is carried from the corresponding source record. The
+route refuses individual diagnosis and medication/dose recommendation
+requests. When no relevant approved passage is available, it returns an
+abstention with no citations. No approved production documents are currently
+loaded, so the default runtime abstains. Example URLs and placeholder
+citations above are schema illustrations only.
 
-Before implementation, the backend must validate request size, question content, authentication, usage limits, and AI-service availability.
+The FastAPI route validates question length and language. The public Express
+API does not call this route yet; authentication, usage limits, and
+service-to-service controls must be implemented before public integration.
 
 The response must not imply that a diagnosis was established or that an emergency was ruled out.
 

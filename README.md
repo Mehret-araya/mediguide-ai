@@ -64,9 +64,11 @@ The repository includes an Express backend with Supabase Auth registration,
 login, token refresh, logout, current-user lookup, and authenticated account
 deletion routes. It also includes PostgreSQL connection configuration, a
 source-review foundation, a responsive website with Supabase Auth flows, and
-a FastAPI AI-service health endpoint. RAG answers, database migrations,
-conversation history, verified facility data, and clinically reviewed
-emergency rules are not yet implemented.
+a FastAPI AI service with source-gated local ingestion, lexical retrieval, and
+extractive answering. No approved production documents are configured, so the
+AI service abstains by default; it has no configured embedding model, pgvector
+adapter, or LLM. Database migrations, conversation history, verified facility
+data, and clinically reviewed emergency rules are not yet implemented.
 
 ### Backend authentication setup
 

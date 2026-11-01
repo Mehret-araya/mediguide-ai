@@ -2,7 +2,11 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-from app.rag.registry import HealthSourceRecord
+from app.rag.registry import (
+    HealthSourceRecord,
+    ReviewAuditEvent,
+    require_approved_source,
+)
 
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
 _MAX_CHUNK_CHARS = 1200
@@ -23,6 +27,25 @@ class DocumentChunk:
     chunk_id: str
     text: str
     citation: SourceCitation
+    source_metadata: HealthSourceRecord
+    approval_event: ReviewAuditEvent
+
+
+def validate_approved_chunk(chunk: DocumentChunk) -> None:
+    source, _approval = require_approved_source(
+        chunk.source_metadata,
+        [chunk.approval_event],
+    )
+    citation = chunk.citation
+    if (
+        citation.source_id != source.id
+        or citation.title != source.title
+        or citation.publisher != source.publisher
+        or citation.url != str(source.url)
+    ):
+        raise ValueError(
+            "Chunk citation metadata does not match its approved source."
+        )
 
 
 def _split_long_paragraph(text: str, max_chars: int) -> list[str]:
@@ -44,6 +67,7 @@ def _split_long_paragraph(text: str, max_chars: int) -> list[str]:
 def chunk_document(
     text: str,
     source: HealthSourceRecord,
+    approval_event: ReviewAuditEvent,
     *,
     max_chars: int = _MAX_CHUNK_CHARS,
 ) -> list[DocumentChunk]:
@@ -119,6 +143,8 @@ def chunk_document(
                         url=str(source.url),
                         section=section,
                     ),
+                    source_metadata=source,
+                    approval_event=approval_event,
                 )
             )
     return chunks

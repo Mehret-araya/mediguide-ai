@@ -1,6 +1,7 @@
 import asyncio
 import json
 import uuid
+from pathlib import Path
 
 import httpx
 import pytest
@@ -52,7 +53,7 @@ async def test_unknown_route_returns_not_found() -> None:
 
 
 @pytest.mark.anyio
-async def test_valid_health_education_request_is_not_generated_yet() -> None:
+async def test_empty_approved_corpus_returns_an_explicit_abstention() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://testserver",
@@ -62,13 +63,14 @@ async def test_valid_health_education_request_is_not_generated_yet() -> None:
             json={"question": "What is malaria?"},
         )
 
-    assert response.status_code == 501
+    assert response.status_code == 200
     assert response.headers.get("X-Request-ID")
-    assert response.json() == {
-        "code": "NOT_IMPLEMENTED",
-        "message": "Health education responses are not available yet.",
-        "requestId": response.headers["X-Request-ID"],
-    }
+    assert response.json()["citations"] == []
+    assert response.json()["requestId"] == response.headers["X-Request-ID"]
+    assert "couldn't find relevant information" in response.json()["answer"]
+    assert "No relevant approved source passage was retrieved." in response.json()[
+        "limitations"
+    ]
 
 
 @pytest.mark.anyio
@@ -82,7 +84,7 @@ async def test_question_at_maximum_length_passes_validation() -> None:
             json={"question": "q" * 2000},
         )
 
-    assert response.status_code == 501
+    assert response.status_code == 200
 
 
 def test_health_education_route_documents_request_and_error_schemas() -> None:
@@ -96,12 +98,122 @@ def test_health_education_route_documents_request_and_error_schemas() -> None:
     assert operation["responses"]["422"]["content"]["application/json"][
         "schema"
     ]["$ref"].endswith("/APIError")
-    assert operation["responses"]["501"]["content"]["application/json"][
+    assert operation["responses"]["200"]["content"]["application/json"][
         "schema"
-    ]["$ref"].endswith("/APIError")
+    ]["$ref"].endswith("/HealthEducationResponse")
     assert openapi["components"]["schemas"]["HealthEducationRequest"][
         "properties"
     ]["question"]["maxLength"] == 2000
+
+
+@pytest.mark.anyio
+async def test_answer_uses_a_retrieved_passage_and_its_verified_metadata(
+    tmp_path: Path,
+) -> None:
+    source = {
+        "id": "test-source",
+        "title": "Synthetic test document",
+        "publisher": "Test publisher",
+        "url": "https://example.org/test",
+        "accessedDate": "2026-10-17",
+        "language": "en",
+        "topics": ["test"],
+        "reviewStatus": "approved",
+        "reviewer": "Test reviewer",
+        "reviewedAt": "2026-10-17",
+        "limitations": ["Synthetic fixture; not a medical source."],
+    }
+    audit = [
+        {
+            "sourceId": "test-source",
+            "fromStatus": "pending_review",
+            "toStatus": "approved",
+            "reviewer": "Test reviewer",
+            "reviewedAt": "2026-10-17",
+            "reason": "Synthetic test approval only.",
+        }
+    ]
+    content_path = tmp_path / "source.md"
+    content_path.write_text(
+        "# Overview\nMalaria is caused by parasites transmitted by mosquitoes. "
+        "This unrelated sentence must not be used.",
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "approved-sources.json"
+    manifest_path.write_text(
+        json.dumps(
+            [
+                {
+                    "source": source,
+                    "auditHistory": audit,
+                    "documentPath": "source.md",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    service = create_app(
+        Settings(
+            app_env="testing",
+            knowledge_base_manifest=manifest_path,
+        )
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=service),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/health-education",
+            json={"question": "What causes malaria?"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == (
+        "Retrieved source passages:\n\n"
+        "Malaria is caused by parasites transmitted by mosquitoes."
+    )
+    assert body["citations"] == [
+        {
+            "sourceId": "test-source",
+            "title": "Synthetic test document",
+            "publisher": "Test publisher",
+            "url": "https://example.org/test",
+            "section": "Overview",
+        }
+    ]
+    assert "Synthetic fixture; not a medical source." in body["limitations"]
+    assert body["requestId"] == response.headers["X-Request-ID"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Do I have malaria?",
+        "What dosage should I take?",
+        "Which medicine should I take?",
+    ],
+)
+async def test_personal_clinical_request_is_refused_without_citations(
+    question: str,
+) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/health-education",
+            json={"question": question},
+        )
+
+    assert response.status_code == 200
+    assert (
+        "can't diagnose" in response.json()["answer"]
+        or "can't recommend" in response.json()["answer"]
+    )
+    assert response.json()["citations"] == []
 
 
 @pytest.mark.anyio

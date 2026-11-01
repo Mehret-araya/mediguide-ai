@@ -1,8 +1,10 @@
 import hashlib
+from dataclasses import replace
 
 import pytest
 from pydantic import ValidationError
 
+from app.rag.chunking import validate_approved_chunk
 from app.rag.ingestion import ingest_document
 from app.rag.registry import SourceNotApprovedError, require_approved_source
 
@@ -64,6 +66,10 @@ def test_ingestion_preserves_registry_metadata_and_section_citations() -> None:
     assert chunks[0].citation.publisher == "Test publisher"
     assert chunks[0].citation.url == "https://example.org/test-document"
     assert chunks[0].citation.section == "Overview"
+    assert chunks[0].source_metadata.review_status.value == "approved"
+    assert chunks[0].source_metadata.limitations == [
+        "Synthetic fixture; not a medical source."
+    ]
     assert chunks[1].citation.section == "Limitations"
 
 
@@ -93,3 +99,18 @@ def test_ingestion_chunks_long_documents_with_bounded_size() -> None:
 def test_ingestion_rejects_empty_document_text() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         ingest_document("  ", source_record(), approval_audit())
+
+
+def test_chunk_citation_cannot_diverge_from_approved_registry_metadata() -> None:
+    chunk = ingest_document(
+        "A test passage.",
+        source_record(),
+        approval_audit(),
+    )[0]
+    mismatched = replace(
+        chunk,
+        citation=replace(chunk.citation, title="Unverified title"),
+    )
+
+    with pytest.raises(ValueError, match="does not match its approved source"):
+        validate_approved_chunk(mismatched)
