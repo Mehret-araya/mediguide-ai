@@ -3,8 +3,18 @@
 ## Status
 
 This service currently provides a FastAPI process-health endpoint and a
-validation-only health-education route. It does not generate health answers,
-retrieve medical sources, or provide clinically reviewed emergency guidance.
+validation-only health-education route. The RAG package now supports ingestion
+and chunking of operator-supplied text only when source metadata and an
+approval audit event satisfy the backend registry contract. No approved
+production source documents are present or loaded; the API does not yet
+retrieve or generate health answers, or provide clinically reviewed emergency
+guidance.
+
+The ingestion module does not download URLs, approve sources, extract files,
+or persist chunks. Operators must provide extracted text alongside the
+verified registry record and audit history. Checksums are verified when the
+registry record supplies one. Synthetic source records used in tests are
+fixtures only and are not medical evidence.
 
 ## Health education API contract
 

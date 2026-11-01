@@ -164,6 +164,16 @@ Test results must be recorded. Do not claim that retrieval or citation accuracy 
 
 ## 12. Current Status
 
-This policy is a development plan. No source should be considered approved merely because this document exists.
+The backend contains a source registry and review workflow. The AI service
+contains an ingestion path that enforces the registry's approval status and
+approval audit evidence, verifies an optional content checksum, and preserves
+source metadata and section headings on text chunks. It accepts operator-
+supplied text; it does not fetch documents, approve sources, or persist the
+result.
 
-The source registry, review workflow, ingestion process, citation validation, and evaluation tests must be implemented before the project claims to provide verified, evidence-grounded answers.
+No production source documents or approval records are currently available to
+the AI service. Retrieval, answer generation, persistent chunk storage, and
+end-to-end citation evaluation remain unimplemented. No source should be
+considered approved merely because this policy or test fixtures exist, and the
+project must not claim to provide verified, evidence-grounded answers until
+those remaining controls are implemented and evaluated.
