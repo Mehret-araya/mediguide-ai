@@ -112,8 +112,13 @@ Legal and regulatory obligations must be assessed for the intended deployment lo
 
 This plan is not evidence that all safeguards are in place. The backend now delegates account registration, authentication, token
 refresh, logout, identity lookup, and account deletion to Supabase Auth. The
-service-role key is used only server-side for account deletion; passwords and
-provider error details are not logged or returned. Automated tests use mocked
+service-role key is used only server-side for account deletion and inserting
+validated assistant messages; it is never used for ordinary user-owned
+queries or exposed to the frontend. Authenticated users can insert only their
+own `user` messages under RLS. The backend must verify conversation ownership
+before privileged assistant insertion because the service role bypasses RLS.
+Passwords, service credentials, and provider error details are not logged or
+returned. Automated tests use mocked
 provider responses, and no live Supabase Auth configuration was available for
 integration testing. The frontend sends credentialed requests and does not
 access session tokens from JavaScript; production deployment must use HTTPS

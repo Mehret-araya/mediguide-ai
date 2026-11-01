@@ -312,21 +312,36 @@ foreign conversation identifiers both return `404 Not Found`.
 
 Purpose: Ask a general health-education question in an owned conversation.
 
-Request: `{ "question": "...", "language": "en" }`. The question is trimmed
-and limited to 2,000 characters; only English is accepted by the current
-AI-service contract.
+Request: `{ "question": "...", "language": "en" }` with an
+`Idempotency-Key` header containing a UUID. The question is trimmed and limited
+to 2,000 characters; only English is accepted by the current AI-service
+contract. Clients must reuse the same idempotency key when retrying the same
+submission. Reusing the key with a different question returns `409`.
 
-The backend verifies conversation ownership before calling the private AI
-service. When the AI service returns a validated answer, the question and
-assistant response are inserted together through the user's scoped Supabase
-client. Citation metadata and limitations are saved with the assistant
-message. If the AI service is unavailable, the request fails safely and
-neither message is persisted. An abstention from the AI service is a valid
-answer and is stored with its limitations.
+The backend verifies conversation ownership through the authenticated user's
+request-scoped Supabase client before calling the private AI service. The
+user's question is inserted with that same user-scoped client, and the
+authenticated-user RLS policy allows only `role = 'user'` in a conversation
+owned by `auth.uid()`. The validated assistant response is inserted by a
+separate backend-only Supabase client using `SUPABASE_SERVICE_ROLE_KEY`.
+Because that role bypasses RLS, the backend ownership check is required before
+every assistant insertion. The service role has only `INSERT` privilege on
+`messages`; it is never exposed to browser code or used for ordinary user
+queries. Citation metadata and limitations are stored with assistant
+messages.
+
+On a first attempt, AI generation failure means neither message is inserted.
+If assistant persistence fails after the user message is saved, the API
+returns a safe storage error; retrying with the same idempotency key completes
+the request without duplicating either message. A replay of an already
+completed key returns the saved messages and the same request ID. An
+abstention from the AI service is a valid answer and is stored with its
+limitations.
 
 Possible errors include `400` validation errors, `401` unauthenticated,
-`404` conversation not found (including foreign IDs), and safe `502`/`503`/
-`504` AI-service errors.
+`404` conversation not found (including foreign IDs), `409` idempotency-key
+reuse with a different question, safe `502`/`503`/`504` AI-service errors,
+and `503` safe storage errors.
 
 ### DELETE /api/v1/conversations/:conversationId
 
@@ -338,7 +353,9 @@ Expected success: `204 No Content`. Foreign and unknown identifiers both
 return `404 Not Found`. The database foreign key cascades deletion to messages.
 
 The two-user behavior test is opt-in and has not yet been executed against the
-hosted database. Use dedicated non-production Supabase users and keep their
+hosted database. It checks owner message insertion, cross-user message
+insertion denial, direct assistant insertion denial, and cross-user reads.
+Use dedicated non-production Supabase users and keep their
 access tokens in local process environment variables only; never send tokens
 through chat, source code, shell history, or logs. Conversation retention and
 backup deletion schedules still require a product policy.

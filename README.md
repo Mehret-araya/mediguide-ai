@@ -128,19 +128,35 @@ The Supabase migrations create profiles linked to Supabase Auth users, reviewed
 health sources and an append-only review history, source chunks with optional
 pgvector embeddings, and private conversations/messages. Row-level security
 restricts profile and conversation access to the owning authenticated user;
-message reads, inserts, and deletes are limited to messages in the user's own
-conversations. Anonymous users have no table/view privileges. The
-`service_role` has no direct privileges on profiles, conversations, or
-messages. Source retrieval is exposed only through views that require a
-matching latest approval event. Any database role with RLS-bypass privileges
-must still be treated as privileged and kept out of public clients.
+message reads and deletes are limited to messages in the user's own
+conversations, and authenticated users can insert only `user` messages there.
+Anonymous users have no table/view privileges. The `service_role` has no
+privileges on profiles or conversations and only `INSERT` on messages. Source
+retrieval is exposed only through views that require a matching latest approval
+event. Any database role with RLS-bypass privileges must still be treated as
+privileged and kept out of public clients.
 
 The API persists conversations using the verified user's request-scoped
-Supabase client. Apply the follow-up migration
-`supabase/migrations/20261101010000_conversation_message_insert.sql` after the
-foundation migration before enabling conversation writes. It adds the
-limitations field and an owner-scoped message-insert policy; it does not grant
-normal user queries to the service role.
+Supabase client. The backend verifies ownership before generating an answer
+and inserts the `assistant` message with a separate server-only client using
+`SUPABASE_SERVICE_ROLE_KEY`; the key is never sent to the frontend. Since the
+service role bypasses RLS, that explicit ownership check is mandatory. Apply
+the follow-up migrations in timestamp order after the foundation migration:
+`supabase/migrations/20261101010000_conversation_message_insert.sql` adds the
+limitations field, then
+`supabase/migrations/20261101020000_secure_conversation_message_insertion.sql`
+adds idempotency, restricts authenticated inserts to `role = 'user'`, and
+grants the server role only column-level `INSERT` needed for assistant
+responses. The API requires a UUID `Idempotency-Key`; retries with the same
+key reuse message rows rather than duplicating them. The later migration is
+additive and does not rewrite the earlier migration's history.
+
+Run route and service-client unit tests with `npm test` from `backend/`.
+Database security checks remain opt-in with `npm run test:database` after
+setting `RUN_DATABASE_INTEGRATION=true` and/or
+`RUN_DATABASE_RLS_INTEGRATION=true` in a safe local process environment. The
+RLS behavior test requires two dedicated non-production Supabase users and
+must not be pointed at production data.
 
 After authenticating the Supabase CLI and linking the intended project, apply
 the tracked migrations with `npx supabase db push` from the repository root.
