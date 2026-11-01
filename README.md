@@ -67,8 +67,13 @@ source-review foundation, a responsive website with Supabase Auth flows, and
 a FastAPI AI service with source-gated local ingestion, lexical retrieval, and
 extractive answering. No approved production documents are configured, so the
 AI service abstains by default; it has no configured embedding model, pgvector
-adapter, or LLM. Database migrations, conversation history, verified facility
-data, and clinically reviewed emergency rules are not yet implemented.
+adapter, or LLM. The database foundation and authenticated conversation API
+are implemented, but the follow-up message-write migration and two-user RLS
+behavior test still require verification on the intended Supabase project.
+Verified Addis Ababa facility data and clinically reviewed emergency rules
+are not available. The facility API/provider interface and empty-state search
+are implemented, but the endpoint intentionally returns unavailable until an
+authoritative dataset is supplied.
 
 ### Backend authentication setup
 
@@ -84,10 +89,20 @@ The backend exposes `/api/v1/auth/register`, `/login`, `/refresh`, `/logout`,
 access token for non-browser clients. The website is connected through
 credentialed requests and the backend's HttpOnly access/refresh cookies; token
 values are not exposed to browser JavaScript or stored in local storage.
-Account deletion currently removes only the Supabase Auth identity because
-conversation and application records are not yet persisted.
+Account deletion removes the Supabase Auth identity; the database foreign-key
+cascade deletes the user's profile and conversations when both tracked
+migrations are applied. This behavior must be verified against the intended
+Supabase project before production use.
 
-Copy `frontend/.env.example` to `frontend/.env` to override `VITE_API_URL`.
+In local development, the frontend uses Vite's `/api` proxy to reach the
+Express service on `127.0.0.1:5000`; keep `VITE_API_URL` blank for this setup.
+Start the backend and frontend in separate terminals. If the Vite development
+server chooses a loopback host/port other than `localhost:5173`, development
+CORS and cookie-origin validation accept HTTP loopback origins only; remote
+hosts remain disallowed. `VITE_API_URL` may be set to an absolute API origin
+when a deployment does not provide a same-origin proxy, and the backend's
+`FRONTEND_URL` must list that exact production frontend origin.
+
 Deploy the frontend and API on the same site so the `SameSite=Lax` session
 cookies are sent by the browser. The frontend configuration must never contain
 Supabase keys. Run the frontend from `frontend/` with `npm run dev`.
@@ -121,14 +136,35 @@ The Supabase migrations create profiles linked to Supabase Auth users, reviewed
 health sources and an append-only review history, source chunks with optional
 pgvector embeddings, and private conversations/messages. Row-level security
 restricts profile and conversation access to the owning authenticated user;
-authenticated users can select or delete only messages in their own
-conversations, and anonymous users have no table/view privileges. The
-`service_role` has no direct privileges on profiles, conversations, or
-messages. Message insertion is intentionally not granted yet; add a
-separately reviewed owner-scoped API or database operation before enabling it.
-Source retrieval is exposed only through views that require a matching latest
-approval event. Any database role with RLS-bypass privileges must still be
-treated as privileged and kept out of public clients.
+message reads and deletes are limited to messages in the user's own
+conversations, and authenticated users can insert only `user` messages there.
+Anonymous users have no table/view privileges. The `service_role` has no
+privileges on profiles or conversations and only `INSERT` on messages. Source
+retrieval is exposed only through views that require a matching latest approval
+event. Any database role with RLS-bypass privileges must still be treated as
+privileged and kept out of public clients.
+
+The API persists conversations using the verified user's request-scoped
+Supabase client. The backend verifies ownership before generating an answer
+and inserts the `assistant` message with a separate server-only client using
+`SUPABASE_SERVICE_ROLE_KEY`; the key is never sent to the frontend. Since the
+service role bypasses RLS, that explicit ownership check is mandatory. Apply
+the follow-up migrations in timestamp order after the foundation migration:
+`supabase/migrations/20261101010000_conversation_message_insert.sql` adds the
+limitations field, then
+`supabase/migrations/20261101020000_secure_conversation_message_insertion.sql`
+adds idempotency, restricts authenticated inserts to `role = 'user'`, and
+grants the server role only column-level `INSERT` needed for assistant
+responses. The API requires a UUID `Idempotency-Key`; retries with the same
+key reuse message rows rather than duplicating them. The later migration is
+additive and does not rewrite the earlier migration's history.
+
+Run route and service-client unit tests with `npm test` from `backend/`.
+Database security checks remain opt-in with `npm run test:database` after
+setting `RUN_DATABASE_INTEGRATION=true` and/or
+`RUN_DATABASE_RLS_INTEGRATION=true` in a safe local process environment. The
+RLS behavior test requires two dedicated non-production Supabase users and
+must not be pointed at production data.
 
 After authenticating the Supabase CLI and linking the intended project, apply
 the tracked migrations with `npx supabase db push` from the repository root.
@@ -145,13 +181,68 @@ npm run test:database
 Remove-Item Env:RUN_DATABASE_INTEGRATION
 ```
 
-The opt-in test runs `SELECT 1` and checks the expected tables, pgvector type,
-and row-level security. It is not a substitute for authorization tests using
-real authenticated database roles.
+The database opt-in test runs `SELECT 1` and checks the expected tables,
+columns, pgvector type, grants, and row-level security. It does not apply
+migrations.
+
+To run the separate two-user RLS behavior test, create or use two dedicated
+non-production Supabase Auth users and confirm both accounts. Configure
+`DATABASE_URL` and verified TLS settings in `backend/.env` as above. From
+`backend/`, use this PowerShell snippet to obtain fresh access tokens without
+printing them or putting credentials in shell history:
+
+```powershell
+$projectUrl = Read-Host "Supabase project URL"
+$anonKey = Read-Host "Supabase publishable/anon key"
+function Set-RlsTestToken($variableName) {
+  $email = Read-Host "Email for $variableName"
+  $securePassword = Read-Host "Password for $variableName" -AsSecureString
+  $password = [System.Net.NetworkCredential]::new("", $securePassword).Password
+  try {
+    $login = Invoke-RestMethod `
+      -Uri "$projectUrl/auth/v1/token?grant_type=password" `
+      -Method Post `
+      -Headers @{ apikey = $anonKey } `
+      -ContentType "application/json" `
+      -Body (@{ email = $email; password = $password } | ConvertTo-Json)
+    [Environment]::SetEnvironmentVariable(
+      $variableName, $login.access_token, "Process"
+    )
+  } finally {
+    $password = $null
+    $securePassword = $null
+    $login = $null
+  }
+}
+
+try {
+  Set-RlsTestToken "RLS_TEST_USER_A_ACCESS_TOKEN"
+  Set-RlsTestToken "RLS_TEST_USER_B_ACCESS_TOKEN"
+  $env:RUN_DATABASE_INTEGRATION = "true"
+  $env:RUN_DATABASE_RLS_INTEGRATION = "true"
+  npm run test:database
+} finally {
+  Remove-Item Env:RLS_TEST_USER_A_ACCESS_TOKEN -ErrorAction SilentlyContinue
+  Remove-Item Env:RLS_TEST_USER_B_ACCESS_TOKEN -ErrorAction SilentlyContinue
+  Remove-Item Env:RUN_DATABASE_INTEGRATION -ErrorAction SilentlyContinue
+  Remove-Item Env:RUN_DATABASE_RLS_INTEGRATION -ErrorAction SilentlyContinue
+}
+```
+
+The test verifies both tokens with Supabase Auth, temporarily creates fixture
+profiles, conversations, and messages inside a PostgreSQL transaction, then
+checks each user's read and write isolation under the `authenticated` role.
+All fixture writes are rolled back. It requires the configured database role
+to be able to assume `authenticated`; it does not apply migrations or use
+service-role credentials. Use dedicated non-production test users. Enter
+their access tokens only in a local process environment, never in chat,
+source files, shell history, or logs. The behavior test has not yet been run
+against the hosted database.
 
 Run the backend from its directory with `npm run dev`. Its `/health` endpoint
 checks the API process only; live PostgreSQL connectivity is a separate
 dependency check. The project reports that verified database connectivity now
-works, but the schema migration has not yet been confirmed on the hosted
-project. The opt-in test above verifies both connectivity and migration state;
-it never applies the migration.
+works and the foundation schema was checked previously; the follow-up
+conversation-write migration has not yet been verified on the hosted project.
+The opt-in test above verifies connectivity and migration state; it never
+applies migrations.

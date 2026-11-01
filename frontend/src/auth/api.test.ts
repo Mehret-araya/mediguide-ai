@@ -30,6 +30,7 @@ describe('browser authentication API client', () => {
 
     expect(message).toContain('Check email')
     const [url, options] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('/api/v1/auth/register')
     expect(String(url)).toMatch(/\/api\/v1\/auth\/register$/u)
     expect(options).toMatchObject({
       method: 'POST',

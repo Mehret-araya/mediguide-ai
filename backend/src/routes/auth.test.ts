@@ -106,6 +106,73 @@ describe("Supabase-backed authentication routes", () => {
     expect(response.text).not.toContain("test-service-role-key");
   });
 
+  it("logs sanitized Supabase signup diagnostics without exposing personal data or secrets", async () => {
+    const email = "private.person@example.org";
+    const password = "private-test-password";
+    const name = "Private Person";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      providerResponse(
+        {
+          code: "email_exists",
+          message: `Account ${email} for ${name}; password=${password}; api_key=${configuration.SUPABASE_ANON_KEY}`,
+        },
+        400,
+      ),
+    );
+    const app = createTestApp(fetcher);
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ name, email, password });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      status: "error",
+      code: "AUTH_REQUEST_FAILED",
+      message: "The account could not be created.",
+    });
+    expect(diagnostic).toHaveBeenCalledOnce();
+    expect(diagnostic).toHaveBeenCalledWith("Supabase Auth signup failed", {
+      providerStatus: 400,
+      providerCode: "email_exists",
+      providerMessage: expect.any(String),
+    });
+
+    const loggedDetails = JSON.stringify(diagnostic.mock.calls);
+    for (const sensitiveValue of [
+      email,
+      password,
+      name,
+      configuration.SUPABASE_ANON_KEY,
+      configuration.SUPABASE_SERVICE_ROLE_KEY,
+    ]) {
+      expect(loggedDetails).not.toContain(sensitiveValue);
+    }
+    expect(response.text).not.toContain("email_exists");
+    expect(response.text).not.toContain(email);
+    expect(response.text).not.toContain(password);
+  });
+
+  it("accepts local loopback Vite origins in development", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      providerResponse(null, 204),
+    );
+    const app = createTestApp(fetcher);
+
+    const response = await request(app)
+      .post("/api/v1/auth/register")
+      .set("Origin", "http://127.0.0.1:5181")
+      .send({
+        name: "Example User",
+        email: "person@example.org",
+        password: "long-enough-test-password",
+      });
+
+    expect(response.status).toBe(202);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("sets HttpOnly auth cookies and returns no tokens on successful login", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({

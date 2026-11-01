@@ -3,6 +3,9 @@ import {
   SupabaseAuthClient,
   SupabaseAuthError,
 } from "../auth/supabase-auth.js";
+import {
+  isAllowedBrowserOrigin as isAllowedOrigin,
+} from "../security/browser-origins.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const ACCESS_COOKIE = "mediguide_access";
@@ -49,16 +52,9 @@ function getCookie(req: Request, name: string): string | null {
   return null;
 }
 
-function getConfiguredOrigins(): string[] {
-  return (process.env.FRONTEND_URL || "http://localhost:5173")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-}
-
 function isAllowedBrowserOrigin(req: Request): boolean {
   const origin = req.get("origin");
-  return !origin || getConfiguredOrigins().includes(origin);
+  return isAllowedOrigin(origin);
 }
 
 function validateBrowserOrigin(req: Request, res: Response): boolean {
@@ -78,7 +74,7 @@ function usesCookieSession(req: Request): boolean {
   return getCookie(req, ACCESS_COOKIE) !== null;
 }
 
-function validateCookieMutationOrigin(
+export function validateCookieMutationOrigin(
   req: Request,
   res: Response,
 ): boolean {

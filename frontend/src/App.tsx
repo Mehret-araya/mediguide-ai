@@ -1,6 +1,21 @@
-import { useState, type FormEvent } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react'
 import { AuthDialog } from './auth/AuthDialog'
 import { useAuth } from './auth/auth-context'
+import {
+  conversationsApi,
+  type ConversationMessage,
+  type ConversationSummary,
+} from './conversations/api'
+import {
+  facilitiesApi,
+  type HealthcareFacility,
+} from './facilities/api'
 import './App.css'
 
 type IconName =
@@ -192,27 +207,275 @@ function App() {
   const [assistantNotice, setAssistantNotice] = useState('')
   const [facilitySearch, setFacilitySearch] = useState('')
   const [facilityNotice, setFacilityNotice] = useState('')
+  const [facilityType, setFacilityType] = useState('')
+  const [facilities, setFacilities] = useState<HealthcareFacility[]>([])
+  const [facilityLoading, setFacilityLoading] = useState(false)
   const [expandedFeature, setExpandedFeature] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ConversationMessage[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [assistantLoadingUserId, setAssistantLoadingUserId] = useState<string | null>(null)
+  const [historyError, setHistoryError] = useState('')
+  const [historyOwnerId, setHistoryOwnerId] = useState<string | null>(null)
+  const authenticatedUserIdRef = useRef<string | null>(null)
+  const pendingMessageRef = useRef<{
+    userId: string
+    conversationId: string
+    question: string
+    idempotencyKey: string
+  } | null>(null)
+  const assistantLoading =
+    status === 'authenticated' &&
+    user?.id !== undefined &&
+    assistantLoadingUserId === user.id
 
-  function submitQuestion(event: FormEvent<HTMLFormElement>) {
+  useLayoutEffect(() => {
+    const nextUserId =
+      status === 'authenticated' ? user?.id ?? null : null
+    if (authenticatedUserIdRef.current !== nextUserId) {
+      pendingMessageRef.current = null
+    }
+    authenticatedUserIdRef.current = nextUserId
+  }, [status, user?.id])
+
+  useEffect(() => {
+    let active = true
+
+    if (status !== 'authenticated' || !user) {
+      void Promise.resolve().then(() => {
+        if (!active) return
+        setConversations([])
+        setActiveConversationId(null)
+        setMessages([])
+        setQuestion('')
+        setAssistantNotice('')
+        setHistoryError('')
+        setHistoryLoading(false)
+        setHistoryOwnerId(null)
+      })
+      return () => {
+        active = false
+      }
+    }
+
+    void (async () => {
+      try {
+        const history = await conversationsApi.list()
+        if (!active) return
+        setHistoryOwnerId(user.id)
+        setHistoryError('')
+        setConversations(history)
+        setActiveConversationId(null)
+        setMessages([])
+        if (history[0]) {
+          const detail = await conversationsApi.get(history[0].id)
+          if (!active) return
+          setActiveConversationId(detail.conversation.id)
+          setMessages(detail.messages)
+        }
+      } catch (error) {
+        if (!active) return
+        setHistoryOwnerId(user.id)
+        setConversations([])
+        setActiveConversationId(null)
+        setMessages([])
+        setHistoryError(
+          error instanceof Error
+            ? error.message
+            : 'Conversation history could not be loaded.',
+        )
+      } finally {
+        if (active) setHistoryLoading(false)
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [status, user])
+
+  const visibleConversations =
+    status === 'authenticated' && user?.id === historyOwnerId
+      ? conversations
+      : []
+  const visibleMessages =
+    status === 'authenticated' && user?.id === historyOwnerId ? messages : []
+  const historyPending =
+    status === 'authenticated' &&
+    (historyLoading || user?.id !== historyOwnerId)
+
+  async function selectConversation(id: string) {
+    const requestUserId = authenticatedUserIdRef.current
+    if (!requestUserId) return
+
+    setHistoryLoading(true)
+    setHistoryError('')
+    try {
+      const detail = await conversationsApi.get(id)
+      if (authenticatedUserIdRef.current !== requestUserId) return
+      setActiveConversationId(detail.conversation.id)
+      setMessages(detail.messages)
+    } catch (error) {
+      if (authenticatedUserIdRef.current !== requestUserId) return
+      setHistoryError(
+        error instanceof Error
+          ? error.message
+          : 'Conversation history could not be loaded.',
+      )
+    } finally {
+      if (authenticatedUserIdRef.current === requestUserId) {
+        setHistoryLoading(false)
+      }
+    }
+  }
+
+  async function deleteConversation(id: string) {
+    const requestUserId = authenticatedUserIdRef.current
+    if (!requestUserId) return
+
+    setHistoryError('')
+    try {
+      await conversationsApi.delete(id)
+      if (authenticatedUserIdRef.current !== requestUserId) return
+      const remaining = conversations.filter((item) => item.id !== id)
+      setConversations(remaining)
+      if (activeConversationId === id) {
+        setActiveConversationId(null)
+        setMessages([])
+        if (remaining[0]) {
+          await selectConversation(remaining[0].id)
+        }
+      }
+    } catch (error) {
+      if (authenticatedUserIdRef.current !== requestUserId) return
+      setHistoryError(
+        error instanceof Error
+          ? error.message
+          : 'The conversation could not be deleted.',
+      )
+    }
+  }
+
+  async function submitQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!question.trim()) {
       setAssistantNotice('Enter a general health question to continue.')
       return
     }
 
-    setAssistantNotice(
-      'Your question was not sent or saved. The AI assistant is not connected yet.',
-    )
+    if (status !== 'authenticated' || !user) {
+      setAssistantNotice('Sign in to ask a question and save its answer to your history.')
+      setAuthOpen(true)
+      return
+    }
+
+    const requestUserId = user.id
+    const submittedQuestion = question.trim()
+    setAssistantLoadingUserId(requestUserId)
+    setAssistantNotice('')
+    try {
+      let conversationId =
+        historyOwnerId === user.id ? activeConversationId : null
+      let conversationCreatedAt = visibleConversations.find(
+        (item) => item.id === conversationId,
+      )?.created_at
+      if (!conversationId) {
+        const created = await conversationsApi.create()
+        if (authenticatedUserIdRef.current !== requestUserId) return
+        conversationId = created.id
+        conversationCreatedAt = created.created_at
+        setActiveConversationId(created.id)
+        setHistoryOwnerId(requestUserId)
+        setConversations((current) => [created, ...current])
+      }
+
+      const targetConversationId = conversationId
+      const pendingMessage = pendingMessageRef.current
+      const idempotencyKey =
+        pendingMessage?.userId === requestUserId &&
+        pendingMessage.question === submittedQuestion &&
+        pendingMessage.conversationId === targetConversationId
+          ? pendingMessage.idempotencyKey
+          : crypto.randomUUID()
+      pendingMessageRef.current = {
+        userId: requestUserId,
+        conversationId: targetConversationId,
+        question: submittedQuestion,
+        idempotencyKey,
+      }
+      const result = await conversationsApi.sendMessage(
+        targetConversationId,
+        submittedQuestion,
+        idempotencyKey,
+      )
+      if (authenticatedUserIdRef.current !== requestUserId) return
+      if (pendingMessageRef.current?.idempotencyKey === idempotencyKey) {
+        pendingMessageRef.current = null
+      }
+      setActiveConversationId(targetConversationId)
+      setMessages((current) =>
+        activeConversationId === targetConversationId &&
+        historyOwnerId === user.id
+          ? [...current, ...result.messages]
+          : result.messages,
+      )
+      setConversations((current) => {
+        const latestMessage = result.messages.at(-1)
+        const existing =
+          historyOwnerId === user.id ? current : []
+        const updated = existing.filter(
+          (item) => item.id !== targetConversationId,
+        )
+        return [
+          {
+            id: targetConversationId,
+            created_at: conversationCreatedAt ?? new Date().toISOString(),
+            updated_at: latestMessage?.created_at ?? new Date().toISOString(),
+          },
+          ...updated,
+        ]
+      })
+      setQuestion('')
+    } catch (error) {
+      if (authenticatedUserIdRef.current !== requestUserId) return
+      setAssistantNotice(
+        error instanceof Error
+          ? error.message
+          : 'The health assistant could not complete this request.',
+      )
+    } finally {
+      setAssistantLoadingUserId((current) =>
+        current === requestUserId ? null : current,
+      )
+    }
   }
 
-  function submitFacilitySearch(event: FormEvent<HTMLFormElement>) {
+  async function submitFacilitySearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setFacilityNotice(
-      facilitySearch.trim()
-        ? 'Facility search is not connected yet. No facility results are available.'
-        : 'Enter a city or area. Facility search is not connected yet.',
-    )
+    setFacilityLoading(true)
+    setFacilityNotice('')
+    setFacilities([])
+    try {
+      const results = await facilitiesApi.search({
+        area: facilitySearch,
+        type: facilityType,
+      })
+      setFacilities(results)
+      setFacilityNotice(
+        results.length === 0
+          ? 'No facilities matched this search.'
+          : `${results.length} facility result${results.length === 1 ? '' : 's'} found.`,
+      )
+    } catch (error) {
+      setFacilityNotice(
+        error instanceof Error
+          ? error.message
+          : 'Verified facility information is not available right now.',
+      )
+    } finally {
+      setFacilityLoading(false)
+    }
   }
 
   function closeMenu() {
@@ -314,7 +577,7 @@ function App() {
               <div className="assistant-preview">
                 <div className="preview-topline">
                   <span className="preview-avatar"><Icon name="spark" size={20} /></span>
-                  <span><strong>Your health guide</strong><small><i /> Prototype preview</small></span>
+                  <span><strong>Your health guide</strong><small><i /> Source-grounded assistant</small></span>
                   <span className="preview-menu">•••</span>
                 </div>
                 <div className="preview-content">
@@ -322,7 +585,7 @@ function App() {
                   <h2>Start with a question.</h2>
                   <p>
                     Explore general health information at your own pace. The
-                    AI assistant is not connected yet.
+                    assistant answers only when its approved sources support a response.
                   </p>
                   <div className="preview-prompt">
                     <span>What would you like to understand?</span>
@@ -330,7 +593,7 @@ function App() {
                   </div>
                   <div className="preview-disclaimer">
                     <Icon name="shield" size={14} />
-                    <span>No answers are generated in this preview.</span>
+                    <span>Not a diagnosis or substitute for professional care.</span>
                   </div>
                 </div>
               </div>
@@ -356,11 +619,11 @@ function App() {
               <span className="section-kicker"><Icon name="spark" size={16} /> YOUR HEALTH ASSISTANT</span>
               <h2>A little more clarity can go a long way.</h2>
               <p>
-                Ask general health questions and explore reliable information.
-                MediGuide AI is still in development, so questions are not sent
-                and no AI-generated answers are available.
+                Ask general health questions and receive source-grounded
+                information when approved evidence is available. The assistant
+                abstains when it cannot support an answer.
               </p>
-              <div className="availability-pill"><span /> AI responses are not connected</div>
+              <div className="availability-pill"><span /> General information only · English responses</div>
             </div>
             <form className="assistant-form" onSubmit={submitQuestion}>
               <label htmlFor="health-question">What would you like to learn about?</label>
@@ -376,13 +639,53 @@ function App() {
                 rows={3}
               />
               <div className="assistant-form-footer">
-                <span><Icon name="shield" size={14} /> Not sent or saved</span>
-                <button className="button button-primary" type="submit">
-                  Ask MediGuide <Icon name="arrow" size={17} />
+                <span><Icon name="shield" size={14} /> {status === 'authenticated' ? 'Saved to your account' : 'Sign in required to ask and save'}</span>
+                <button
+                  className="button button-primary"
+                  type="submit"
+                  disabled={
+                    assistantLoading ||
+                    status === 'loading' ||
+                    (status === 'authenticated' && historyPending)
+                  }
+                >
+                  {assistantLoading ? 'Finding sources…' : 'Ask MediGuide'}
+                  {!assistantLoading && <Icon name="arrow" size={17} />}
                 </button>
               </div>
               {assistantNotice && <p className="inline-notice" role="status">{assistantNotice}</p>}
             </form>
+            <div className="conversation-thread" aria-live="polite" aria-busy={assistantLoading}>
+              {historyPending && <p className="conversation-status">Loading your conversation…</p>}
+              {visibleMessages.map((message) => (
+                <article className={`conversation-message conversation-message-${message.role}`} key={message.id}>
+                  <span className="conversation-role">
+                    {message.role === 'assistant' ? 'MediGuide AI' : 'You'}
+                  </span>
+                  <p>{message.content}</p>
+                  {message.citations.length > 0 && (
+                    <div className="message-citations">
+                      <strong>Sources</strong>
+                      <ul>
+                        {message.citations.map((citation) => (
+                          <li key={`${citation.sourceId}-${citation.url}`}>
+                            <a href={citation.url} target="_blank" rel="noreferrer">
+                              {citation.title}
+                            </a>
+                            <span>{citation.publisher}{citation.section ? ` · ${citation.section}` : ''}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {message.role === 'assistant' && message.limitations.length > 0 && (
+                    <p className="message-limitations">
+                      Limitations: {message.limitations.join(' ')}
+                    </p>
+                  )}
+                </article>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -436,9 +739,9 @@ function App() {
               <span className="section-kicker"><Icon name="pin" size={16} /> CARE, CLOSER TO YOU</span>
               <h2>Find care in your community.</h2>
               <p>
-                We’re working toward a directory of verified hospitals and
-                health centers. Facility listings are not available in this
-                prototype.
+                Search for facilities when verified directory data is
+                connected. Unverified addresses, services, and contact details
+                are never presented as confirmed.
               </p>
               <a className="text-link" href="#emergency">
                 Need urgent help? See emergency information <Icon name="arrow" size={16} />
@@ -447,7 +750,7 @@ function App() {
             <div className="facility-search-card">
               <div className="facility-card-heading">
                 <span className="facility-icon"><Icon name="pin" size={21} /></span>
-                <div><h3>Healthcare facilities</h3><p>Search verified care near you</p></div>
+                <div><h3>Healthcare facilities</h3><p>Search provider-verified information</p></div>
               </div>
               <form className="facility-form" onSubmit={submitFacilitySearch}>
                 <label htmlFor="facility-location">City or area</label>
@@ -463,14 +766,59 @@ function App() {
                     placeholder="e.g. Addis Ababa"
                   />
                 </div>
-                <button className="button button-primary" type="submit">
-                  Search facilities <Icon name="arrow" size={17} />
+                <label htmlFor="facility-type">Facility type</label>
+                <select
+                  id="facility-type"
+                  value={facilityType}
+                  onChange={(event) => setFacilityType(event.target.value)}
+                >
+                  <option value="">All types</option>
+                  <option value="hospital">Hospital</option>
+                  <option value="health_center">Health center</option>
+                  <option value="clinic">Clinic</option>
+                  <option value="other">Other</option>
+                </select>
+                <button
+                  className="button button-primary"
+                  type="submit"
+                  disabled={facilityLoading}
+                >
+                  {facilityLoading ? 'Searching…' : 'Search facilities'}
+                  {!facilityLoading && <Icon name="arrow" size={17} />}
                 </button>
               </form>
-              <div className="facility-status" role={facilityNotice ? 'status' : undefined}>
+              <div className="facility-status" role="status">
                 <span className="status-dot" />
-                {facilityNotice || 'Verified facility information is not connected yet.'}
+                {facilityNotice || 'No verified facility dataset is connected.'}
               </div>
+              {facilities.map((facility) => (
+                <article className="facility-result" key={facility.id}>
+                  <div className="facility-result-heading">
+                    <h4>{facility.name}</h4>
+                    <span className={`facility-verification facility-verification-${facility.verificationStatus}`}>
+                      {facility.verificationStatus === 'verified'
+                        ? `Verified${facility.verifiedAt ? ` · ${facility.verifiedAt}` : ''}`
+                        : facility.verificationStatus === 'outdated'
+                          ? 'Verification may be outdated'
+                          : 'Unverified information'}
+                    </span>
+                  </div>
+                  <p>{facility.address}{facility.area ? ` · ${facility.area}` : ''}</p>
+                  <p>{facility.phone ?? 'Phone number not verified'} · {facility.type.replaceAll('_', ' ')}</p>
+                  <div className="facility-result-links">
+                    {facility.sourceUrl && (
+                      <a href={facility.sourceUrl} target="_blank" rel="noreferrer">
+                        Source
+                      </a>
+                    )}
+                    {facility.mapUrl && (
+                      <a href={facility.mapUrl} target="_blank" rel="noreferrer">
+                        Map
+                      </a>
+                    )}
+                  </div>
+                </article>
+              ))}
             </div>
           </div>
         </section>
@@ -482,14 +830,52 @@ function App() {
               <span className="section-kicker">YOUR SPACE</span>
               <h2>Your health history, when you’re ready.</h2>
               <p>
-                Conversation history is not available yet. Nothing you enter
-                here is saved or linked to an account.
+                Your conversations are private to your account. You can reopen
+                or delete any saved conversation here.
               </p>
             </div>
-            <div className="history-empty">
-              <span className="empty-icon"><Icon name="calendar" size={21} /></span>
-              <strong>No saved conversations</strong>
-              <span>History features are in development</span>
+            <div className="history-list">
+              {              status === 'authenticated' && visibleConversations.length > 0 ? (
+                visibleConversations.map((item, index) => (
+                  <div
+                    className={`history-item${item.id === activeConversationId ? ' is-active' : ''}`}
+                    key={item.id}
+                  >
+                    <button
+                      type="button"
+                      className="history-select"
+                      onClick={() => void selectConversation(item.id)}
+                      aria-current={item.id === activeConversationId ? 'true' : undefined}
+                    >
+                      <strong>Conversation {visibleConversations.length - index}</strong>
+                      <span>{new Date(item.updated_at).toLocaleString()}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="history-delete"
+                      aria-label={`Delete conversation ${visibleConversations.length - index}`}
+                      onClick={() => void deleteConversation(item.id)}
+                    >
+                      <Icon name="close" size={16} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="history-empty">
+                  <span className="empty-icon"><Icon name="calendar" size={21} /></span>
+                  <strong>
+                    {status === 'authenticated'
+                      ? historyPending ? 'Loading conversations…' : 'No saved conversations'
+                      : 'Sign in to keep your history'}
+                  </strong>
+                  <span>
+                    {status === 'authenticated'
+                      ? 'Ask the assistant to start a conversation.'
+                      : 'Only your account can access its saved conversations.'}
+                  </span>
+                </div>
+              )}
+              {historyError && user?.id === historyOwnerId && <p className="inline-notice" role="alert">{historyError}</p>}
             </div>
           </div>
         </section>
@@ -582,10 +968,10 @@ function App() {
             </button>
             <span className="dialog-icon"><Icon name="spark" size={23} /></span>
             <span className="section-kicker">MEDIGUIDE AI</span>
-            <h2 id="dialog-title">Your assistant is getting ready.</h2>
+            <h2 id="dialog-title">Ask for source-grounded health information.</h2>
             <p>
-              AI responses are not connected in this prototype. Your questions
-              are not sent or saved.
+              Sign in to submit a general health question and save its response
+              and citations to your private conversation history.
             </p>
             <a className="button button-primary dialog-action" href="#assistant" onClick={() => setAssistantOpen(false)}>
               Learn about the assistant <Icon name="arrow" size={17} />

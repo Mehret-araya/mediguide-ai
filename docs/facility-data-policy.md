@@ -177,6 +177,10 @@ Do not advertise the directory as complete or fully current unless evidence supp
 
 ## 14. Current Status
 
-This policy describes planned facility-data handling.
-
-The source registry, verification workflow, facility records, maintenance schedule, and tests must be implemented before the directory can be described as verified or current.
+The backend now defines a provider interface and validates returned facility
+records, source/map URL schemes, and verification metadata. The endpoint fails
+closed because no provider or facility dataset is configured. No hospital,
+health-center, or clinic listing is currently represented as verified. The
+authoritative source registry, facility review workflow, real records,
+maintenance schedule, and release validation must be supplied before the
+directory can be described as current or complete.

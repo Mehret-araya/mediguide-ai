@@ -74,6 +74,21 @@ describe("MediGuide AI API", () => {
     expect(response.body.code).toBe("VALIDATION_ERROR");
   });
 
+  it("protects persisted conversation routes with verified authentication", async () => {
+    const response = await request(app).get("/api/v1/conversations");
+
+    expect(response.status).toBe(401);
+    expect(response.body.code).toBe("UNAUTHORIZED");
+  });
+
+  it("fails closed when no verified facility directory is configured", async () => {
+    const response = await request(app).get("/api/v1/facilities");
+
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe("FACILITY_DATA_UNAVAILABLE");
+    expect(response.body.message).not.toContain("https://");
+  });
+
   it("returns 404 for an unknown API route", async () => {
     const response = await request(app).get("/api/v1/does-not-exist");
 
@@ -143,6 +158,20 @@ describe("MediGuide AI API", () => {
       status: "error",
       message: "This origin is not allowed to access the API.",
     });
+  });
+
+  it("allows local Vite development origins through the credentialed proxy", async () => {
+    const response = await request(app)
+      .options("/api/v1/auth/login")
+      .set("Origin", "http://127.0.0.1:5181")
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "content-type");
+
+    expect(response.status).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe(
+      "http://127.0.0.1:5181",
+    );
+    expect(response.headers["access-control-allow-credentials"]).toBe("true");
   });
 
   it("includes the Helmet security header", async () => {

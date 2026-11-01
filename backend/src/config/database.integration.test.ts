@@ -1,9 +1,13 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
+import { SupabaseAuthClient } from "../auth/supabase-auth.js";
 import { createDatabasePoolConfig } from "./database-options.js";
 
 const integrationEnabled = process.env.RUN_DATABASE_INTEGRATION === "true";
+const rlsIntegrationEnabled =
+  process.env.RUN_DATABASE_RLS_INTEGRATION === "true";
 
 function normalizeStringArray(value: unknown, column: string): string[] {
   let parsed = value;
@@ -94,10 +98,14 @@ describe("Supabase database foundation", () => {
         try {
           schema = await pool.query<{
             missing_objects: unknown;
+            missing_columns: unknown;
+            missing_message_objects: unknown;
             missing_rls: unknown;
             invalid_ownership_policies: unknown;
             public_data_privileges: unknown;
             service_role_privileges: unknown;
+            missing_service_role_privileges: unknown;
+            excess_service_role_column_privileges: unknown;
             embedding_dimensioned: boolean;
             dimension_dependent_indexes: unknown;
           }>(`
@@ -111,6 +119,27 @@ describe("Supabase database foundation", () => {
                 ('approved_source_chunks'),
                 ('conversations'),
                 ('messages')
+            ),
+            expected_columns(table_name, column_name) AS (
+              VALUES
+                ('messages', 'limitations'),
+                ('messages', 'idempotency_key')
+            ),
+            expected_message_objects(object_name, object_kind) AS (
+              VALUES
+                ('messages_limitations_nonempty', 'constraint'),
+                ('messages_conversation_idempotency_role_idx', 'index')
+            ),
+            expected_service_insert_columns(column_name) AS (
+              VALUES
+                ('id'),
+                ('conversation_id'),
+                ('role'),
+                ('content'),
+                ('citations'),
+                ('limitations'),
+                ('created_at'),
+                ('idempotency_key')
             ),
             expected_rls(table_name) AS (
               VALUES
@@ -135,6 +164,7 @@ describe("Supabase database foundation", () => {
                 ('conversations', 'conversations_update_own', 'UPDATE', 'user_id'),
                 ('conversations', 'conversations_delete_own', 'DELETE', 'user_id'),
                 ('messages', 'messages_select_own_conversation', 'SELECT', 'conversation_id'),
+                ('messages', 'messages_insert_own_conversation', 'INSERT', 'conversation_id'),
                 ('messages', 'messages_delete_own_conversation', 'DELETE', 'conversation_id')
             ),
             private_relations(relation_name) AS (
@@ -165,6 +195,8 @@ describe("Supabase database foundation", () => {
                 ('public.messages', 'UPDATE'),
                 ('public.messages', 'DELETE'),
                 ('public.messages', 'TRUNCATE'),
+                ('public.messages', 'REFERENCES'),
+                ('public.messages', 'TRIGGER'),
                 ('public.health_source_reviews', 'UPDATE'),
                 ('public.health_source_reviews', 'DELETE'),
                 ('public.health_source_reviews', 'TRUNCATE'),
@@ -183,6 +215,44 @@ describe("Supabase database foundation", () => {
                 WHERE to_regtype('extensions.vector') IS NULL
                 ORDER BY 1
               )) AS missing_objects,
+              to_json(ARRAY(
+                SELECT format(
+                  'public.%s.%s',
+                  expected.table_name,
+                  expected.column_name
+                )
+                FROM expected_columns AS expected
+                WHERE NOT EXISTS (
+                  SELECT 1
+                  FROM pg_attribute AS attribute
+                  WHERE attribute.attrelid =
+                        to_regclass(format('public.%I', expected.table_name))
+                    AND attribute.attname = expected.column_name
+                    AND NOT attribute.attisdropped
+                )
+                ORDER BY expected.table_name, expected.column_name
+              )) AS missing_columns,
+              to_json(ARRAY(
+                SELECT expected.object_name
+                FROM expected_message_objects AS expected
+                WHERE (
+                  expected.object_kind = 'constraint'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint AS constraint_definition
+                    WHERE constraint_definition.conname =
+                          expected.object_name
+                      AND constraint_definition.conrelid =
+                          to_regclass('public.messages')
+                  )
+                ) OR (
+                  expected.object_kind = 'index'
+                  AND to_regclass(
+                    format('public.%I', expected.object_name)
+                  ) IS NULL
+                )
+                ORDER BY expected.object_name
+              )) AS missing_message_objects,
               to_json(ARRAY(
                 SELECT expected.table_name
                 FROM expected_rls AS expected
@@ -218,6 +288,13 @@ describe("Supabase database foundation", () => {
                         COALESCE(policy.with_check, '')
                       ) NOT ILIKE
                         concat('%', expected.ownership_column, '%')
+                   OR (
+                     expected.policy_name = 'messages_insert_own_conversation'
+                     AND (
+                       COALESCE(policy.with_check, '')
+                         !~* 'role[[:space:]]*=[[:space:]]*''user'''
+                     )
+                   )
                 ORDER BY expected.policy_name
               )) AS invalid_ownership_policies,
               to_json(ARRAY(
@@ -254,6 +331,41 @@ describe("Supabase database foundation", () => {
                 ORDER BY restricted.relation_name,
                          restricted.privilege_name
               )) AS service_role_privileges,
+              to_json(ARRAY(
+                SELECT format(
+                  'service_role lacks INSERT on public.messages.%s',
+                  expected.column_name
+                )
+                FROM expected_service_insert_columns AS expected
+                WHERE NOT has_column_privilege(
+                  'service_role',
+                  to_regclass('public.messages'),
+                  expected.column_name,
+                  'INSERT'
+                )
+                ORDER BY expected.column_name
+              )) AS missing_service_role_privileges,
+              to_json(ARRAY(
+                SELECT format(
+                  'service_role has excess %s on public.messages.%s',
+                  column_privilege.privilege_type,
+                  column_privilege.column_name
+                )
+                FROM information_schema.column_privileges AS column_privilege
+                WHERE column_privilege.table_schema = 'public'
+                  AND column_privilege.table_name = 'messages'
+                  AND column_privilege.grantee = 'service_role'
+                  AND (
+                    column_privilege.privilege_type <> 'INSERT'
+                    OR NOT EXISTS (
+                      SELECT 1
+                      FROM expected_service_insert_columns AS expected
+                      WHERE expected.column_name =
+                            column_privilege.column_name
+                    )
+                  )
+                ORDER BY column_privilege.column_name
+              )) AS excess_service_role_column_privileges,
               COALESCE((
                 SELECT attribute.atttypmod <> -1
                 FROM pg_attribute AS attribute
@@ -295,6 +407,14 @@ describe("Supabase database foundation", () => {
             row.missing_objects,
             "missing_objects",
           ),
+          missing_columns: normalizeStringArray(
+            row.missing_columns,
+            "missing_columns",
+          ),
+          missing_message_objects: normalizeStringArray(
+            row.missing_message_objects,
+            "missing_message_objects",
+          ),
           missing_rls: normalizeStringArray(row.missing_rls, "missing_rls"),
           invalid_ownership_policies: normalizeStringArray(
             row.invalid_ownership_policies,
@@ -308,6 +428,14 @@ describe("Supabase database foundation", () => {
             row.service_role_privileges,
             "service_role_privileges",
           ),
+          missing_service_role_privileges: normalizeStringArray(
+            row.missing_service_role_privileges,
+            "missing_service_role_privileges",
+          ),
+          excess_service_role_column_privileges: normalizeStringArray(
+            row.excess_service_role_column_privileges,
+            "excess_service_role_column_privileges",
+          ),
           dimension_dependent_indexes: normalizeStringArray(
             row.dimension_dependent_indexes,
             "dimension_dependent_indexes",
@@ -316,6 +444,24 @@ describe("Supabase database foundation", () => {
         const failures = [
           ...(checks.missing_objects.length > 0
             ? [`missing objects: ${checks.missing_objects.join(", ")}`]
+            : []),
+          ...(checks.excess_service_role_column_privileges.length > 0
+            ? [
+                `excess service-role column privileges: ${checks.excess_service_role_column_privileges.join(", ")}`,
+              ]
+            : []),
+          ...(checks.missing_service_role_privileges.length > 0
+            ? [
+                `missing required service-role privileges: ${checks.missing_service_role_privileges.join(", ")}`,
+              ]
+            : []),
+          ...(checks.missing_columns.length > 0
+            ? [`missing columns: ${checks.missing_columns.join(", ")}`]
+            : []),
+          ...(checks.missing_message_objects.length > 0
+            ? [
+                `missing message security objects: ${checks.missing_message_objects.join(", ")}`,
+              ]
             : []),
           ...(checks.missing_rls.length > 0
             ? [`RLS is disabled on: ${checks.missing_rls.join(", ")}`]
@@ -351,6 +497,255 @@ describe("Supabase database foundation", () => {
             ? undefined
             : `PostgreSQL connected, but migration verification failed: ${failures.join("; ")}`,
         ).toEqual([]);
+      } finally {
+        await pool.end();
+      }
+    },
+  );
+});
+
+describe("Supabase row-level security isolation", () => {
+  it.skipIf(!rlsIntegrationEnabled)(
+    "isolates profiles, conversations, and messages between two authenticated users",
+    async () => {
+      const userAToken = process.env.RLS_TEST_USER_A_ACCESS_TOKEN;
+      const userBToken = process.env.RLS_TEST_USER_B_ACCESS_TOKEN;
+
+      if (!userAToken || !userBToken) {
+        throw new Error(
+          "RLS integration requires RLS_TEST_USER_A_ACCESS_TOKEN and RLS_TEST_USER_B_ACCESS_TOKEN.",
+        );
+      }
+
+      const auth = new SupabaseAuthClient();
+      const [userA, userB] = await Promise.all([
+        auth.getUser(userAToken),
+        auth.getUser(userBToken),
+      ]);
+
+      if (!userA || !userB || userA.id === userB.id) {
+        throw new Error(
+          "RLS integration requires two distinct, valid Supabase user sessions.",
+        );
+      }
+
+      const pool = new pg.Pool(createDatabasePoolConfig(process.env));
+      const conversationA = randomUUID();
+      const conversationB = randomUUID();
+      const messageA = randomUUID();
+      const messageB = randomUUID();
+      const ownerInsertedMessage = randomUUID();
+      const crossUserInsertedMessage = randomUUID();
+      const assistantInsertedMessage = randomUUID();
+      const ownerIdempotencyKey = randomUUID();
+
+      try {
+        const client = await pool.connect();
+        let transactionStarted = false;
+        try {
+          await client.query("BEGIN");
+          transactionStarted = true;
+
+          await client.query(
+            `INSERT INTO public.user_profiles (id, display_name)
+           VALUES ($1, 'RLS test user A'), ($2, 'RLS test user B')
+           ON CONFLICT (id) DO NOTHING`,
+            [userA.id, userB.id],
+          );
+          await client.query(
+            `INSERT INTO public.conversations (id, user_id)
+           VALUES ($1, $2), ($3, $4)`,
+            [conversationA, userA.id, conversationB, userB.id],
+          );
+          await client.query(
+            `INSERT INTO public.messages (id, conversation_id, role, content)
+           VALUES
+             ($1, $2, 'user', 'RLS integration fixture'),
+             ($3, $4, 'user', 'RLS integration fixture')`,
+            [messageA, conversationA, messageB, conversationB],
+          );
+
+          await client.query("SET LOCAL ROLE authenticated");
+          const role = await client.query<{ current_user: string }>(
+            "SELECT current_user",
+          );
+          if (role.rows[0].current_user !== "authenticated") {
+            throw new Error(
+              "RLS integration could not assume the authenticated database role.",
+            );
+          }
+
+          const setAuthenticatedUser = async (
+            userId: string,
+          ): Promise<void> => {
+            await client.query(
+              "SELECT set_config('request.jwt.claim.sub', $1, true)",
+              [userId],
+            );
+          };
+
+          const expectVisible = async (
+            table: "conversations" | "messages" | "user_profiles",
+            id: string,
+            expected: boolean,
+          ): Promise<void> => {
+            const result = await client.query(
+              `SELECT id FROM public.${table} WHERE id = $1`,
+              [id],
+            );
+            if ((result.rowCount === 1) !== expected) {
+              throw new Error(`RLS visibility check failed for ${table}.`);
+            }
+          };
+
+          const expectNoCrossUserWrites = async (
+            profileId: string,
+            conversationId: string,
+            messageId: string,
+          ): Promise<void> => {
+            const profileUpdate = await client.query(
+              `UPDATE public.user_profiles
+               SET display_name = 'Unauthorized update'
+               WHERE id = $1`,
+              [profileId],
+            );
+            const conversationUpdate = await client.query(
+              `UPDATE public.conversations
+               SET updated_at = now()
+               WHERE id = $1`,
+              [conversationId],
+            );
+            const conversationDelete = await client.query(
+              "DELETE FROM public.conversations WHERE id = $1",
+              [conversationId],
+            );
+            const messageDelete = await client.query(
+              "DELETE FROM public.messages WHERE id = $1",
+              [messageId],
+            );
+
+            if (
+              profileUpdate.rowCount !== 0 ||
+              conversationUpdate.rowCount !== 0 ||
+              conversationDelete.rowCount !== 0 ||
+              messageDelete.rowCount !== 0
+            ) {
+              throw new Error(
+                "RLS allowed a user to modify another user's records.",
+              );
+            }
+          };
+
+          const expectPermissionDenied = async (
+            operation: () => Promise<{ rowCount: number | null }>,
+            description: string,
+          ): Promise<void> => {
+            await client.query("SAVEPOINT rls_permission_check");
+            let denied = false;
+            try {
+              const result = await operation();
+              if (result.rowCount === 0) {
+                denied = true;
+              }
+            } catch (error) {
+              const code =
+                typeof error === "object" &&
+                error !== null &&
+                "code" in error &&
+                typeof error.code === "string"
+                  ? error.code
+                  : undefined;
+              if (code === "42501") {
+                denied = true;
+              } else {
+                throw error;
+              }
+            } finally {
+              await client.query("ROLLBACK TO SAVEPOINT rls_permission_check");
+              await client.query("RELEASE SAVEPOINT rls_permission_check");
+            }
+
+            if (!denied) {
+              throw new Error(`RLS allowed a forbidden operation: ${description}.`);
+            }
+          };
+
+          await setAuthenticatedUser(userA.id);
+          await expectVisible("user_profiles", userA.id, true);
+          await expectVisible("user_profiles", userB.id, false);
+          await expectVisible("conversations", conversationA, true);
+          await expectVisible("conversations", conversationB, false);
+          await expectVisible("messages", messageA, true);
+          await expectVisible("messages", messageB, false);
+          await expectNoCrossUserWrites(userB.id, conversationB, messageB);
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `INSERT INTO public.messages
+                   (id, conversation_id, role, content)
+                 VALUES ($1, $2, 'user', 'Cross-user RLS fixture')`,
+                [crossUserInsertedMessage, conversationB],
+              ),
+            "inserting a message into another user's conversation",
+          );
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `INSERT INTO public.messages
+                   (id, conversation_id, role, content)
+                 VALUES ($1, $2, 'assistant', 'Untrusted assistant fixture')`,
+                [assistantInsertedMessage, conversationA],
+              ),
+            "inserting an assistant message as an authenticated user",
+          );
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `UPDATE public.messages
+                 SET content = 'Unauthorized update'
+                 WHERE id = $1`,
+                [messageB],
+              ),
+            "updating another user's message",
+          );
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                "DELETE FROM public.user_profiles WHERE id = $1",
+                [userB.id],
+              ),
+            "deleting another user's profile",
+          );
+          const ownerMessage = await client.query(
+            `INSERT INTO public.messages
+               (id, conversation_id, role, content, idempotency_key)
+             VALUES ($1, $2, 'user', 'Owner RLS fixture', $3)
+             RETURNING id`,
+            [ownerInsertedMessage, conversationA, ownerIdempotencyKey],
+          );
+          if (ownerMessage.rowCount !== 1) {
+            throw new Error("RLS denied a user inserting into their own conversation.");
+          }
+
+          await setAuthenticatedUser(userB.id);
+          await expectVisible("user_profiles", userB.id, true);
+          await expectVisible("user_profiles", userA.id, false);
+          await expectVisible("conversations", conversationB, true);
+          await expectVisible("conversations", conversationA, false);
+          await expectVisible("messages", messageB, true);
+          await expectVisible("messages", messageA, false);
+          await expectVisible("messages", ownerInsertedMessage, false);
+          await expectVisible("messages", crossUserInsertedMessage, false);
+          await expectNoCrossUserWrites(userA.id, conversationA, messageA);
+        } finally {
+          try {
+            if (transactionStarted) {
+              await client.query("ROLLBACK");
+            }
+          } finally {
+            client.release();
+          }
+        }
       } finally {
         await pool.end();
       }
