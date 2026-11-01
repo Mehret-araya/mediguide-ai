@@ -99,10 +99,13 @@ describe("Supabase database foundation", () => {
           schema = await pool.query<{
             missing_objects: unknown;
             missing_columns: unknown;
+            missing_message_objects: unknown;
             missing_rls: unknown;
             invalid_ownership_policies: unknown;
             public_data_privileges: unknown;
             service_role_privileges: unknown;
+            missing_service_role_privileges: unknown;
+            excess_service_role_column_privileges: unknown;
             embedding_dimensioned: boolean;
             dimension_dependent_indexes: unknown;
           }>(`
@@ -119,7 +122,24 @@ describe("Supabase database foundation", () => {
             ),
             expected_columns(table_name, column_name) AS (
               VALUES
-                ('messages', 'limitations')
+                ('messages', 'limitations'),
+                ('messages', 'idempotency_key')
+            ),
+            expected_message_objects(object_name, object_kind) AS (
+              VALUES
+                ('messages_limitations_nonempty', 'constraint'),
+                ('messages_conversation_idempotency_role_idx', 'index')
+            ),
+            expected_service_insert_columns(column_name) AS (
+              VALUES
+                ('id'),
+                ('conversation_id'),
+                ('role'),
+                ('content'),
+                ('citations'),
+                ('limitations'),
+                ('created_at'),
+                ('idempotency_key')
             ),
             expected_rls(table_name) AS (
               VALUES
@@ -175,6 +195,8 @@ describe("Supabase database foundation", () => {
                 ('public.messages', 'UPDATE'),
                 ('public.messages', 'DELETE'),
                 ('public.messages', 'TRUNCATE'),
+                ('public.messages', 'REFERENCES'),
+                ('public.messages', 'TRIGGER'),
                 ('public.health_source_reviews', 'UPDATE'),
                 ('public.health_source_reviews', 'DELETE'),
                 ('public.health_source_reviews', 'TRUNCATE'),
@@ -211,6 +233,27 @@ describe("Supabase database foundation", () => {
                 ORDER BY expected.table_name, expected.column_name
               )) AS missing_columns,
               to_json(ARRAY(
+                SELECT expected.object_name
+                FROM expected_message_objects AS expected
+                WHERE (
+                  expected.object_kind = 'constraint'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint AS constraint_definition
+                    WHERE constraint_definition.conname =
+                          expected.object_name
+                      AND constraint_definition.conrelid =
+                          to_regclass('public.messages')
+                  )
+                ) OR (
+                  expected.object_kind = 'index'
+                  AND to_regclass(
+                    format('public.%I', expected.object_name)
+                  ) IS NULL
+                )
+                ORDER BY expected.object_name
+              )) AS missing_message_objects,
+              to_json(ARRAY(
                 SELECT expected.table_name
                 FROM expected_rls AS expected
                 WHERE NOT COALESCE((
@@ -245,6 +288,13 @@ describe("Supabase database foundation", () => {
                         COALESCE(policy.with_check, '')
                       ) NOT ILIKE
                         concat('%', expected.ownership_column, '%')
+                   OR (
+                     expected.policy_name = 'messages_insert_own_conversation'
+                     AND (
+                       COALESCE(policy.with_check, '')
+                         !~* 'role[[:space:]]*=[[:space:]]*''user'''
+                     )
+                   )
                 ORDER BY expected.policy_name
               )) AS invalid_ownership_policies,
               to_json(ARRAY(
@@ -281,6 +331,41 @@ describe("Supabase database foundation", () => {
                 ORDER BY restricted.relation_name,
                          restricted.privilege_name
               )) AS service_role_privileges,
+              to_json(ARRAY(
+                SELECT format(
+                  'service_role lacks INSERT on public.messages.%s',
+                  expected.column_name
+                )
+                FROM expected_service_insert_columns AS expected
+                WHERE NOT has_column_privilege(
+                  'service_role',
+                  to_regclass('public.messages'),
+                  expected.column_name,
+                  'INSERT'
+                )
+                ORDER BY expected.column_name
+              )) AS missing_service_role_privileges,
+              to_json(ARRAY(
+                SELECT format(
+                  'service_role has excess %s on public.messages.%s',
+                  column_privilege.privilege_type,
+                  column_privilege.column_name
+                )
+                FROM information_schema.column_privileges AS column_privilege
+                WHERE column_privilege.table_schema = 'public'
+                  AND column_privilege.table_name = 'messages'
+                  AND column_privilege.grantee = 'service_role'
+                  AND (
+                    column_privilege.privilege_type <> 'INSERT'
+                    OR NOT EXISTS (
+                      SELECT 1
+                      FROM expected_service_insert_columns AS expected
+                      WHERE expected.column_name =
+                            column_privilege.column_name
+                    )
+                  )
+                ORDER BY column_privilege.column_name
+              )) AS excess_service_role_column_privileges,
               COALESCE((
                 SELECT attribute.atttypmod <> -1
                 FROM pg_attribute AS attribute
@@ -326,6 +411,10 @@ describe("Supabase database foundation", () => {
             row.missing_columns,
             "missing_columns",
           ),
+          missing_message_objects: normalizeStringArray(
+            row.missing_message_objects,
+            "missing_message_objects",
+          ),
           missing_rls: normalizeStringArray(row.missing_rls, "missing_rls"),
           invalid_ownership_policies: normalizeStringArray(
             row.invalid_ownership_policies,
@@ -339,6 +428,14 @@ describe("Supabase database foundation", () => {
             row.service_role_privileges,
             "service_role_privileges",
           ),
+          missing_service_role_privileges: normalizeStringArray(
+            row.missing_service_role_privileges,
+            "missing_service_role_privileges",
+          ),
+          excess_service_role_column_privileges: normalizeStringArray(
+            row.excess_service_role_column_privileges,
+            "excess_service_role_column_privileges",
+          ),
           dimension_dependent_indexes: normalizeStringArray(
             row.dimension_dependent_indexes,
             "dimension_dependent_indexes",
@@ -348,8 +445,23 @@ describe("Supabase database foundation", () => {
           ...(checks.missing_objects.length > 0
             ? [`missing objects: ${checks.missing_objects.join(", ")}`]
             : []),
+          ...(checks.excess_service_role_column_privileges.length > 0
+            ? [
+                `excess service-role column privileges: ${checks.excess_service_role_column_privileges.join(", ")}`,
+              ]
+            : []),
+          ...(checks.missing_service_role_privileges.length > 0
+            ? [
+                `missing required service-role privileges: ${checks.missing_service_role_privileges.join(", ")}`,
+              ]
+            : []),
           ...(checks.missing_columns.length > 0
             ? [`missing columns: ${checks.missing_columns.join(", ")}`]
+            : []),
+          ...(checks.missing_message_objects.length > 0
+            ? [
+                `missing message security objects: ${checks.missing_message_objects.join(", ")}`,
+              ]
             : []),
           ...(checks.missing_rls.length > 0
             ? [`RLS is disabled on: ${checks.missing_rls.join(", ")}`]
@@ -424,6 +536,8 @@ describe("Supabase row-level security isolation", () => {
       const messageB = randomUUID();
       const ownerInsertedMessage = randomUUID();
       const crossUserInsertedMessage = randomUUID();
+      const assistantInsertedMessage = randomUUID();
+      const ownerIdempotencyKey = randomUUID();
 
       try {
         const client = await pool.connect();
@@ -577,6 +691,16 @@ describe("Supabase row-level security isolation", () => {
           await expectPermissionDenied(
             () =>
               client.query(
+                `INSERT INTO public.messages
+                   (id, conversation_id, role, content)
+                 VALUES ($1, $2, 'assistant', 'Untrusted assistant fixture')`,
+                [assistantInsertedMessage, conversationA],
+              ),
+            "inserting an assistant message as an authenticated user",
+          );
+          await expectPermissionDenied(
+            () =>
+              client.query(
                 `UPDATE public.messages
                  SET content = 'Unauthorized update'
                  WHERE id = $1`,
@@ -594,10 +718,10 @@ describe("Supabase row-level security isolation", () => {
           );
           const ownerMessage = await client.query(
             `INSERT INTO public.messages
-               (id, conversation_id, role, content)
-             VALUES ($1, $2, 'user', 'Owner RLS fixture')
+               (id, conversation_id, role, content, idempotency_key)
+             VALUES ($1, $2, 'user', 'Owner RLS fixture', $3)
              RETURNING id`,
-            [ownerInsertedMessage, conversationA],
+            [ownerInsertedMessage, conversationA, ownerIdempotencyKey],
           );
           if (ownerMessage.rowCount !== 1) {
             throw new Error("RLS denied a user inserting into their own conversation.");
