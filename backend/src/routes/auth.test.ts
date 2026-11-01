@@ -106,6 +106,25 @@ describe("Supabase-backed authentication routes", () => {
     expect(response.text).not.toContain("test-service-role-key");
   });
 
+  it("accepts local loopback Vite origins in development", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      providerResponse(null, 204),
+    );
+    const app = createTestApp(fetcher);
+
+    const response = await request(app)
+      .post("/api/v1/auth/register")
+      .set("Origin", "http://127.0.0.1:5181")
+      .send({
+        name: "Example User",
+        email: "person@example.org",
+        password: "long-enough-test-password",
+      });
+
+    expect(response.status).toBe(202);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("sets HttpOnly auth cookies and returns no tokens on successful login", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({

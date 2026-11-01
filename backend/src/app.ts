@@ -14,6 +14,7 @@ import createAuthRouter from "./routes/auth.js";
 import { createConversationsRouter } from "./routes/conversations.js";
 import educationRouter from "./routes/education.js";
 import { createFacilitiesRouter } from "./routes/facilities.js";
+import { isAllowedBrowserOrigin } from "./security/browser-origins.js";
 
 // Handle unexpected errors without exposing internal details.
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
@@ -70,20 +71,13 @@ export function createApp(
 ) {
   const app = express();
 
-  const allowedOrigins = (
-    process.env.FRONTEND_URL || "http://localhost:5173"
-  )
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
   app.use(helmet());
 
   app.use(
     cors({
       credentials: true,
       origin(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (isAllowedBrowserOrigin(origin)) {
           callback(null, true);
           return;
         }
