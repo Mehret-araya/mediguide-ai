@@ -118,5 +118,7 @@ provider responses, and no live Supabase Auth configuration was available for
 integration testing. The frontend sends credentialed requests and does not
 access session tokens from JavaScript; production deployment must use HTTPS
 and same-site frontend/API origins for `SameSite=Lax` cookies. Conversation
-data does not yet exist, and deployment rate-limiting and security controls
-still require review.
+routes use the verified user's request-scoped Supabase client and enforce
+ownership with RLS; the two-user behavior test is implemented but has not yet
+been verified against the hosted database. A retention policy, deployment
+rate-limiting, and production security controls still require review.

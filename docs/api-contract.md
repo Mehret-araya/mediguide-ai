@@ -67,8 +67,9 @@ Expected success: `200 OK`.
 
 Expected success returns the minimal user object. Provider-issued access and
 refresh tokens are set as `HttpOnly`, `SameSite=Lax` cookies scoped to
-`/api/v1/auth`; they are not returned in JSON or available to browser
-JavaScript. Cookies are marked `Secure` in production.
+`/api/v1` for the access token and `/api/v1/auth` for the refresh token; they
+are not returned in JSON or available to browser JavaScript. Cookies are marked
+`Secure` in production.
 
 ### POST /api/v1/auth/refresh
 
@@ -109,10 +110,9 @@ Expected success: `204 No Content`.
 
 The backend resolves the account from the verified bearer token, then uses its
 server-only Supabase service-role key to delete that account. The caller cannot
-choose another user ID. This currently deletes the Supabase Auth identity only;
-conversation history and other persistent application data do not yet exist.
-When they do, account deletion must be extended and tested to cover those
-records and the documented retention policy.
+choose another user ID. The Supabase Auth deletion cascades to the profile and conversations through
+the database foreign keys after the migrations are applied. Verify this
+cascade and any backup-retention behavior before production use.
 
 Registration and login enforce server-side email and password bounds. Cookie
 mutations enforce an allowed request Origin; cookie-authenticated mutations
@@ -124,9 +124,8 @@ exposed to the client. Deploy the frontend and API on the same site so the
 
 The React frontend calls these routes with `credentials: "include"` and uses
 `VITE_API_URL` to select the Express API origin. The sign-in, registration,
-session restoration, logout, and account deletion UI is implemented. No
-conversation or history route is currently protected because persistent
-history endpoints do not exist yet.
+session restoration, logout, account deletion, and conversation-history UI is
+implemented.
 
 Authentication errors currently use `{ "status": "error", "code": "...",
 "message": "..." }`. The API-wide standard error envelope remains future work.
@@ -271,15 +270,34 @@ The current education endpoints use the response formats implemented by the back
 
 The conversation-history endpoints in this section are **planned and not yet implemented**.
 
-### GET /api/v1/conversations
+**Implementation status: Implemented in Express and frontend; database write
+policy requires the follow-up migration.**
 
-Purpose: List the authenticated user's conversations.
+All conversation routes require a verified Supabase Auth user. Database
+operations use the request-scoped Supabase client carrying that user's JWT;
+they do not use the service-role key or direct privileged PostgreSQL queries.
+RLS remains the final ownership enforcement layer. Browser cookie mutations
+also require an allowed Origin.
+
+### POST /api/v1/conversations
+
+Purpose: Create an empty conversation for the authenticated user.
 
 Authentication: Required.
 
-Expected success: `200 OK`.
+Expected success: `201 Created` with the new conversation identifier and
+timestamps. The server derives the owner from the verified identity; callers
+cannot submit a user ID.
 
-Return only conversations owned by the authenticated user. Add pagination before supporting potentially large histories.
+### GET /api/v1/conversations
+
+Purpose: List the authenticated user's conversations, ordered by most recently
+updated.
+
+Authentication: Required.
+
+Expected success: `200 OK`. RLS filters results to the caller's own account.
+Pagination remains necessary before supporting large histories.
 
 ### GET /api/v1/conversations/:conversationId
 
@@ -287,62 +305,108 @@ Purpose: Retrieve a conversation and its permitted messages.
 
 Authentication: Required.
 
-Expected success: `200 OK`.
+Expected success: `200 OK` with messages ordered by timestamp. Missing and
+foreign conversation identifiers both return `404 Not Found`.
 
-The server must verify ownership or other explicitly authorized access before returning any content.
+### POST /api/v1/conversations/:conversationId/messages
+
+Purpose: Ask a general health-education question in an owned conversation.
+
+Request: `{ "question": "...", "language": "en" }`. The question is trimmed
+and limited to 2,000 characters; only English is accepted by the current
+AI-service contract.
+
+The backend verifies conversation ownership before calling the private AI
+service. When the AI service returns a validated answer, the question and
+assistant response are inserted together through the user's scoped Supabase
+client. Citation metadata and limitations are saved with the assistant
+message. If the AI service is unavailable, the request fails safely and
+neither message is persisted. An abstention from the AI service is a valid
+answer and is stored with its limitations.
+
+Possible errors include `400` validation errors, `401` unauthenticated,
+`404` conversation not found (including foreign IDs), and safe `502`/`503`/
+`504` AI-service errors.
 
 ### DELETE /api/v1/conversations/:conversationId
 
-Purpose: Delete a conversation according to the documented retention policy.
+Purpose: Delete an owned conversation and its messages.
 
 Authentication: Required.
 
-Expected success: `200 OK` or `204 No Content`, consistently selected during implementation.
+Expected success: `204 No Content`. Foreign and unknown identifiers both
+return `404 Not Found`. The database foreign key cascades deletion to messages.
 
-The server must verify ownership. Deletion behavior for backups, logs, and related records must match the published retention policy.
-
-Conversation history will be optional until its storage, retention, and deletion behavior are implemented and tested.
+The two-user behavior test is opt-in and has not yet been executed against the
+hosted database. Use dedicated non-production Supabase users and keep their
+access tokens in local process environment variables only; never send tokens
+through chat, source code, shell history, or logs. Conversation retention and
+backup deletion schedules still require a product policy.
 
 ## 7. Healthcare Facilities
 
 ### GET /api/v1/facilities
 
-**Implementation status: Planned; not yet implemented.**
+**Implementation status: Provider contract, validation, public API route, and
+frontend search are implemented. No real verified facility provider is
+configured.**
 
 Purpose: Discover healthcare facilities in supported areas, initially focused on Addis Ababa.
 
-Authentication: The final choice depends on whether facility discovery is public or account-restricted.
+Authentication: Not required; the browser request omits account cookies.
 
-Proposed optional query parameters:
+Optional query parameters:
 
-- `area`: supported neighborhood or area.
-- `type`: supported facility category.
-- `page`: pagination page.
-- `limit`: maximum permitted results per page.
+- `area`: search area, up to 120 characters.
+- `type`: `clinic`, `health_center`, `hospital`, or `other`.
+- `limit`: 1 to 50, default 20.
+- `offset`: 0 to 10,000, default 0.
 
-Expected success: `200 OK`.
+Expected success: `200 OK` with `items`, `total`, `limit`, and `offset`.
+Facility records include `id`, `name`, `address`, `area`, `type`, `phone`,
+`sourceUrl`, `mapUrl`, `verifiedAt`, and `verificationStatus`. Unknown contact
+and map values remain `null`. A `verified` record must include an HTTPS source
+URL and a valid verification date. Unverified or outdated records must be
+explicitly identified.
 
-Proposed response:
+The route currently returns `503 FACILITY_DATA_UNAVAILABLE`; it never returns
+example facilities as real results. A data provider must implement the
+backend's `FacilityDirectoryProvider` interface and return records with
+traceable source evidence. The provider must implement area/type filtering and
+offset/limit pagination; the backend validates record shape and HTTPS links.
+The deployment owner must supply an authoritative Addis Ababa dataset, field
+source URLs, facility categories, verification dates, an update/retirement
+process, and a map-link source if map links are desired. Phone numbers,
+opening hours, services, coordinates, and emergency capability must stay
+unknown unless independently verified. Opening hours and coordinates are not
+currently part of the API record.
+
+Example response shape (illustrative only; not a listing):
 
 ```json
 {
+  "status": "ok",
   "items": [
     {
-      "id": "facility-record-id",
-      "name": "Verified facility name",
-      "address": "Verified address",
+      "id": "provider-record-id",
+      "name": "Name supported by source",
+      "address": "Address supported by source",
+      "area": "Addis Ababa",
+      "type": "health_center",
       "phone": null,
-      "openingHours": null,
-      "sourceUrl": "https://example.org/official-source",
-      "verifiedAt": null
+      "sourceUrl": "https://authoritative.example/facilities",
+      "mapUrl": null,
+      "verifiedAt": "2026-10-31",
+      "verificationStatus": "verified"
     }
   ],
-  "page": 1,
-  "limit": 20
+  "total": 1,
+  "limit": 20,
+  "offset": 0
 }
 ```
 
-This is a schema example, not a real facility listing. Real responses must use verified facility records. Unknown phone numbers, opening hours, and verification dates must remain unknown rather than being invented.
+This is a schema example, not a real facility listing.
 
 ## 8. Health and Readiness
 
