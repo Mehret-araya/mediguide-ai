@@ -1,9 +1,13 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
+import { SupabaseAuthClient } from "../auth/supabase-auth.js";
 import { createDatabasePoolConfig } from "./database-options.js";
 
 const integrationEnabled = process.env.RUN_DATABASE_INTEGRATION === "true";
+const rlsIntegrationEnabled =
+  process.env.RUN_DATABASE_RLS_INTEGRATION === "true";
 
 function normalizeStringArray(value: unknown, column: string): string[] {
   let parsed = value;
@@ -351,6 +355,162 @@ describe("Supabase database foundation", () => {
             ? undefined
             : `PostgreSQL connected, but migration verification failed: ${failures.join("; ")}`,
         ).toEqual([]);
+      } finally {
+        await pool.end();
+      }
+    },
+  );
+});
+
+describe("Supabase row-level security isolation", () => {
+  it.skipIf(!rlsIntegrationEnabled)(
+    "isolates profiles, conversations, and messages between two authenticated users",
+    async () => {
+      const userAToken = process.env.RLS_TEST_USER_A_ACCESS_TOKEN;
+      const userBToken = process.env.RLS_TEST_USER_B_ACCESS_TOKEN;
+
+      if (!userAToken || !userBToken) {
+        throw new Error(
+          "RLS integration requires RLS_TEST_USER_A_ACCESS_TOKEN and RLS_TEST_USER_B_ACCESS_TOKEN.",
+        );
+      }
+
+      const auth = new SupabaseAuthClient();
+      const [userA, userB] = await Promise.all([
+        auth.getUser(userAToken),
+        auth.getUser(userBToken),
+      ]);
+
+      if (!userA || !userB || userA.id === userB.id) {
+        throw new Error(
+          "RLS integration requires two distinct, valid Supabase user sessions.",
+        );
+      }
+
+      const pool = new pg.Pool(createDatabasePoolConfig(process.env));
+      const conversationA = randomUUID();
+      const conversationB = randomUUID();
+      const messageA = randomUUID();
+      const messageB = randomUUID();
+
+      try {
+        const client = await pool.connect();
+        let transactionStarted = false;
+        try {
+          await client.query("BEGIN");
+          transactionStarted = true;
+
+          await client.query(
+            `INSERT INTO public.user_profiles (id, display_name)
+           VALUES ($1, 'RLS test user A'), ($2, 'RLS test user B')
+           ON CONFLICT (id) DO NOTHING`,
+            [userA.id, userB.id],
+          );
+          await client.query(
+            `INSERT INTO public.conversations (id, user_id)
+           VALUES ($1, $2), ($3, $4)`,
+            [conversationA, userA.id, conversationB, userB.id],
+          );
+          await client.query(
+            `INSERT INTO public.messages (id, conversation_id, role, content)
+           VALUES
+             ($1, $2, 'user', 'RLS integration fixture'),
+             ($3, $4, 'user', 'RLS integration fixture')`,
+            [messageA, conversationA, messageB, conversationB],
+          );
+
+          await client.query("SET LOCAL ROLE authenticated");
+          const role = await client.query<{ current_user: string }>(
+            "SELECT current_user",
+          );
+          if (role.rows[0].current_user !== "authenticated") {
+            throw new Error(
+              "RLS integration could not assume the authenticated database role.",
+            );
+          }
+
+          const setAuthenticatedUser = async (
+            userId: string,
+          ): Promise<void> => {
+            await client.query(
+              "SELECT set_config('request.jwt.claim.sub', $1, true)",
+              [userId],
+            );
+          };
+
+          const expectVisible = async (
+            table: "conversations" | "messages" | "user_profiles",
+            id: string,
+            expected: boolean,
+          ): Promise<void> => {
+            const result = await client.query(
+              `SELECT id FROM public.${table} WHERE id = $1`,
+              [id],
+            );
+            if ((result.rowCount === 1) !== expected) {
+              throw new Error(`RLS visibility check failed for ${table}.`);
+            }
+          };
+
+          const expectNoCrossUserWrites = async (
+            profileId: string,
+            conversationId: string,
+            messageId: string,
+          ): Promise<void> => {
+            const profileUpdate = await client.query(
+              `UPDATE public.user_profiles
+               SET display_name = 'Unauthorized update'
+               WHERE id = $1`,
+              [profileId],
+            );
+            const conversationUpdate = await client.query(
+              `UPDATE public.conversations
+               SET updated_at = now()
+               WHERE id = $1`,
+              [conversationId],
+            );
+            const messageDelete = await client.query(
+              "DELETE FROM public.messages WHERE id = $1",
+              [messageId],
+            );
+
+            if (
+              profileUpdate.rowCount !== 0 ||
+              conversationUpdate.rowCount !== 0 ||
+              messageDelete.rowCount !== 0
+            ) {
+              throw new Error(
+                "RLS allowed a user to modify another user's records.",
+              );
+            }
+          };
+
+          await setAuthenticatedUser(userA.id);
+          await expectVisible("user_profiles", userA.id, true);
+          await expectVisible("user_profiles", userB.id, false);
+          await expectVisible("conversations", conversationA, true);
+          await expectVisible("conversations", conversationB, false);
+          await expectVisible("messages", messageA, true);
+          await expectVisible("messages", messageB, false);
+          await expectNoCrossUserWrites(userB.id, conversationB, messageB);
+
+          await setAuthenticatedUser(userB.id);
+          await expectVisible("user_profiles", userB.id, true);
+          await expectVisible("user_profiles", userA.id, false);
+          await expectVisible("conversations", conversationB, true);
+          await expectVisible("conversations", conversationA, false);
+          await expectVisible("messages", messageB, true);
+          await expectVisible("messages", messageA, false);
+          await expectNoCrossUserWrites(userA.id, conversationA, messageA);
+        } finally {
+          try {
+            if (transactionStarted) {
+              await client.query("ROLLBACK");
+            }
+          } finally {
+            client.release();
+          }
+        }
       } finally {
         await pool.end();
       }
