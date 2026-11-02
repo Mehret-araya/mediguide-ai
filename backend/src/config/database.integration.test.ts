@@ -107,6 +107,8 @@ describe("Supabase database foundation", () => {
             service_role_privileges: unknown;
             missing_service_role_privileges: unknown;
             excess_service_role_column_privileges: unknown;
+            excess_service_role_effective_insert_columns: unknown;
+            unexpected_message_insert_policies: unknown;
             embedding_dimensioned: boolean;
             dimension_dependent_indexes: unknown;
           }>(`
@@ -184,6 +186,23 @@ describe("Supabase database foundation", () => {
                 ('messages', 'messages_insert_own_conversation', 'INSERT', 'conversation_id'),
                 ('messages', 'messages_insert_owner_guard', 'INSERT', 'conversation_id'),
                 ('messages', 'messages_delete_own_conversation', 'DELETE', 'conversation_id')
+            ),
+            expected_message_insert_policies(
+              policy_name,
+              expected_permissiveness,
+              expected_check
+            ) AS (
+              VALUES
+                (
+                  'messages_insert_own_conversation',
+                  'PERMISSIVE',
+                  'role=''user''andexistsselect1fromconversationsconversationwhereconversation.id=messages.conversation_idandconversation.user_id=selectauth.uid()'
+                ),
+                (
+                  'messages_insert_owner_guard',
+                  'RESTRICTIVE',
+                  'existsselect1fromconversationsconversationwhereconversation.id=messages.conversation_idandconversation.user_id=selectauth.uid()'
+                )
             ),
             private_relations(relation_name) AS (
               VALUES
@@ -270,9 +289,20 @@ describe("Supabase database foundation", () => {
                   ) IS NULL
                 ) OR (
                   expected.object_kind = 'function'
-                  AND to_regprocedure(
-                    format('public.%I()', expected.object_name)
-                  ) IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_proc AS function_definition
+                    JOIN pg_language AS function_language
+                      ON function_language.oid = function_definition.prolang
+                    WHERE function_definition.oid =
+                          to_regprocedure('public.enforce_mediaguide_message_role()')
+                      AND function_language.lanname = 'plpgsql'
+                      AND NOT function_definition.prosecdef
+                      AND COALESCE(
+                            function_definition.proconfig,
+                            ARRAY[]::text[]
+                          ) @> ARRAY['search_path=""']::text[]
+                  )
                 ) OR (
                   expected.object_kind = 'trigger'
                   AND NOT EXISTS (
@@ -282,6 +312,14 @@ describe("Supabase database foundation", () => {
                       AND trigger_definition.tgrelid =
                           to_regclass('public.messages')
                       AND NOT trigger_definition.tgisinternal
+                      AND trigger_definition.tgenabled IN ('O', 'A')
+                      AND (trigger_definition.tgtype & 1) = 1
+                      AND (trigger_definition.tgtype & 2) = 2
+                      AND (trigger_definition.tgtype & 4) = 4
+                      AND trigger_definition.tgfoid =
+                          to_regprocedure(
+                            'public.enforce_mediaguide_message_role()'
+                          )
                   )
                 ) OR (
                   expected.object_kind = 'policy'
@@ -319,7 +357,7 @@ describe("Supabase database foundation", () => {
                 WHERE policy.policyname IS NULL
                    OR policy.cmd <> expected.policy_command
                    OR NOT (
-                     policy.roles @> ARRAY['authenticated']::name[]
+                     policy.roles = ARRAY['authenticated']::name[]
                    )
                    OR concat(
                         COALESCE(policy.qual, ''),
@@ -337,14 +375,45 @@ describe("Supabase database foundation", () => {
                      AND (
                        COALESCE(policy.with_check, '')
                          !~* 'role[[:space:]]*=[[:space:]]*''user'''
+                       OR policy.permissive <> 'PERMISSIVE'
                      )
                    )
                    OR (
                      expected.policy_name = 'messages_insert_owner_guard'
                      AND policy.permissive <> 'RESTRICTIVE'
                    )
+                   OR (
+                     expected.policy_command = 'INSERT'
+                     AND NOT EXISTS (
+                       SELECT 1
+                       FROM expected_message_insert_policies AS insert_policy
+                       WHERE insert_policy.policy_name = expected.policy_name
+                         AND insert_policy.expected_permissiveness =
+                             policy.permissive
+                         AND regexp_replace(
+                               lower(
+                                 COALESCE(policy.with_check, '')
+                               ),
+                               '::text|as[[:space:]]+uid|public\.|[[:space:]()]',
+                               '',
+                               'g'
+                             ) = insert_policy.expected_check
+                     )
+                   )
                 ORDER BY expected.policy_name
               )) AS invalid_ownership_policies,
+              to_json(ARRAY(
+                SELECT policy.policyname
+                FROM pg_policies AS policy
+                WHERE policy.schemaname = 'public'
+                  AND policy.tablename = 'messages'
+                  AND policy.cmd = 'INSERT'
+                  AND policy.policyname NOT IN (
+                    SELECT policy_name
+                    FROM expected_message_insert_policies
+                  )
+                ORDER BY policy.policyname
+              )) AS unexpected_message_insert_policies,
               to_json(ARRAY(
                 SELECT format(
                   'authenticated lacks %s on %s',
@@ -428,6 +497,29 @@ describe("Supabase database foundation", () => {
                   )
                 ORDER BY column_privilege.column_name
               )) AS excess_service_role_column_privileges,
+              to_json(ARRAY(
+                SELECT format(
+                  'service_role effectively has unexpected INSERT on public.messages.%s',
+                  attribute.attname
+                )
+                FROM pg_attribute AS attribute
+                WHERE attribute.attrelid =
+                      to_regclass('public.messages')
+                  AND attribute.attnum > 0
+                  AND NOT attribute.attisdropped
+                  AND has_column_privilege(
+                    'service_role',
+                    to_regclass('public.messages'),
+                    attribute.attname,
+                    'INSERT'
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM expected_service_insert_columns AS expected
+                    WHERE expected.column_name = attribute.attname
+                  )
+                ORDER BY attribute.attname
+              )) AS excess_service_role_effective_insert_columns,
               COALESCE((
                 SELECT attribute.atttypmod <> -1
                 FROM pg_attribute AS attribute
@@ -502,6 +594,14 @@ describe("Supabase database foundation", () => {
             row.excess_service_role_column_privileges,
             "excess_service_role_column_privileges",
           ),
+          excess_service_role_effective_insert_columns: normalizeStringArray(
+            row.excess_service_role_effective_insert_columns,
+            "excess_service_role_effective_insert_columns",
+          ),
+          unexpected_message_insert_policies: normalizeStringArray(
+            row.unexpected_message_insert_policies,
+            "unexpected_message_insert_policies",
+          ),
           dimension_dependent_indexes: normalizeStringArray(
             row.dimension_dependent_indexes,
             "dimension_dependent_indexes",
@@ -514,6 +614,11 @@ describe("Supabase database foundation", () => {
           ...(checks.excess_service_role_column_privileges.length > 0
             ? [
                 `excess service-role column privileges: ${checks.excess_service_role_column_privileges.join(", ")}`,
+              ]
+            : []),
+          ...(checks.excess_service_role_effective_insert_columns.length > 0
+            ? [
+                `excess effective service-role INSERT privileges: ${checks.excess_service_role_effective_insert_columns.join(", ")}`,
               ]
             : []),
           ...(checks.missing_service_role_privileges.length > 0
@@ -568,6 +673,11 @@ describe("Supabase database foundation", () => {
             ? undefined
             : `PostgreSQL connected, but migration verification failed: ${failures.join("; ")}`,
         ).toEqual([]);
+        if (checks.unexpected_message_insert_policies.length > 0) {
+          console.warn(
+            `Additional public.messages INSERT policies were preserved and require review: ${checks.unexpected_message_insert_policies.join(", ")}`,
+          );
+        }
       } finally {
         await pool.end();
       }
@@ -847,6 +957,65 @@ describe("Supabase row-level security isolation", () => {
                 [randomUUID(), conversationA],
               ),
             "inserting a user message as the service role",
+          );
+
+          await client.query("RESET ROLE");
+          const unauthorizedRole = await client.query<{
+            current_user: string;
+            can_bypass_rls: boolean;
+            has_insert_columns: boolean;
+          }>(`
+            SELECT
+              current_user,
+              role.rolsuper OR role.rolbypassrls AS can_bypass_rls,
+              has_column_privilege(
+                current_user,
+                'public.messages',
+                'id',
+                'INSERT'
+              )
+              AND has_column_privilege(
+                current_user,
+                'public.messages',
+                'conversation_id',
+                'INSERT'
+              )
+              AND has_column_privilege(
+                current_user,
+                'public.messages',
+                'role',
+                'INSERT'
+              )
+              AND has_column_privilege(
+                current_user,
+                'public.messages',
+                'content',
+                'INSERT'
+              ) AS has_insert_columns
+            FROM pg_roles AS role
+            WHERE role.rolname = current_user
+          `);
+          const currentDatabaseRole = unauthorizedRole.rows[0];
+          if (
+            !currentDatabaseRole ||
+            currentDatabaseRole.current_user === "authenticated" ||
+            currentDatabaseRole.current_user === "service_role" ||
+            !currentDatabaseRole.can_bypass_rls ||
+            !currentDatabaseRole.has_insert_columns
+          ) {
+            throw new Error(
+              "The disposable database connection must use a non-application role with RLS bypass and message INSERT privileges to verify rejection by the role trigger.",
+            );
+          }
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `INSERT INTO public.messages
+                   (id, conversation_id, role, content)
+                 VALUES ($1, $2, 'user', 'Unauthorized database-role fixture')`,
+                [randomUUID(), conversationA],
+              ),
+            "inserting a message as an unauthorized database role",
           );
         } finally {
           try {
