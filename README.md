@@ -158,6 +158,13 @@ grants the server role only column-level `INSERT` needed for assistant
 responses. The API requires a UUID `Idempotency-Key`; retries with the same
 key reuse message rows rather than duplicating them. The later migration is
 additive and does not rewrite the earlier migration's history.
+Persistence failure logs include only the operation and an allowlisted
+PostgreSQL/PostgREST error code, never the database message or submitted
+question. A `42703` code indicates a missing database column; verify that both
+follow-up migrations completed before changing permissions. A `PGRST204` code
+can indicate a missing column in PostgREST's schema cache. A `42501` code
+indicates a permission failure and should be investigated without granting
+additional service-role access.
 
 Run route and service-client unit tests with `npm test` from `backend/`.
 Database security checks remain opt-in with `npm run test:database` after
