@@ -102,10 +102,13 @@ describe("Supabase database foundation", () => {
             missing_message_objects: unknown;
             missing_rls: unknown;
             invalid_ownership_policies: unknown;
+            missing_authenticated_privileges: unknown;
             public_data_privileges: unknown;
             service_role_privileges: unknown;
             missing_service_role_privileges: unknown;
             excess_service_role_column_privileges: unknown;
+            excess_service_role_effective_insert_columns: unknown;
+            unexpected_message_insert_policies: unknown;
             embedding_dimensioned: boolean;
             dimension_dependent_indexes: unknown;
           }>(`
@@ -128,7 +131,10 @@ describe("Supabase database foundation", () => {
             expected_message_objects(object_name, object_kind) AS (
               VALUES
                 ('messages_limitations_nonempty', 'constraint'),
-                ('messages_conversation_idempotency_role_idx', 'index')
+                ('messages_conversation_idempotency_role_idx', 'index'),
+                ('enforce_mediaguide_message_role', 'function'),
+                ('mediaguide_enforce_message_role', 'trigger'),
+                ('messages_insert_owner_guard', 'policy')
             ),
             expected_service_insert_columns(column_name) AS (
               VALUES
@@ -140,6 +146,19 @@ describe("Supabase database foundation", () => {
                 ('limitations'),
                 ('created_at'),
                 ('idempotency_key')
+            ),
+            expected_authenticated_privileges(
+              relation_name,
+              privilege_name
+            ) AS (
+              VALUES
+                ('public.conversations', 'SELECT'),
+                ('public.conversations', 'INSERT'),
+                ('public.conversations', 'UPDATE'),
+                ('public.conversations', 'DELETE'),
+                ('public.messages', 'SELECT'),
+                ('public.messages', 'INSERT'),
+                ('public.messages', 'DELETE')
             ),
             expected_rls(table_name) AS (
               VALUES
@@ -165,7 +184,25 @@ describe("Supabase database foundation", () => {
                 ('conversations', 'conversations_delete_own', 'DELETE', 'user_id'),
                 ('messages', 'messages_select_own_conversation', 'SELECT', 'conversation_id'),
                 ('messages', 'messages_insert_own_conversation', 'INSERT', 'conversation_id'),
+                ('messages', 'messages_insert_owner_guard', 'INSERT', 'conversation_id'),
                 ('messages', 'messages_delete_own_conversation', 'DELETE', 'conversation_id')
+            ),
+            expected_message_insert_policies(
+              policy_name,
+              expected_permissiveness,
+              expected_check
+            ) AS (
+              VALUES
+                (
+                  'messages_insert_own_conversation',
+                  'PERMISSIVE',
+                  'role=''user''andexistsselect1fromconversationsconversationwhereconversation.id=messages.conversation_idandconversation.user_id=selectauth.uid()'
+                ),
+                (
+                  'messages_insert_owner_guard',
+                  'RESTRICTIVE',
+                  'existsselect1fromconversationsconversationwhereconversation.id=messages.conversation_idandconversation.user_id=selectauth.uid()'
+                )
             ),
             private_relations(relation_name) AS (
               VALUES
@@ -250,6 +287,51 @@ describe("Supabase database foundation", () => {
                   AND to_regclass(
                     format('public.%I', expected.object_name)
                   ) IS NULL
+                ) OR (
+                  expected.object_kind = 'function'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_proc AS function_definition
+                    JOIN pg_language AS function_language
+                      ON function_language.oid = function_definition.prolang
+                    WHERE function_definition.oid =
+                          to_regprocedure('public.enforce_mediaguide_message_role()')
+                      AND function_language.lanname = 'plpgsql'
+                      AND NOT function_definition.prosecdef
+                      AND COALESCE(
+                            function_definition.proconfig,
+                            ARRAY[]::text[]
+                          ) @> ARRAY['search_path=""']::text[]
+                  )
+                ) OR (
+                  expected.object_kind = 'trigger'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_trigger AS trigger_definition
+                    WHERE trigger_definition.tgname = expected.object_name
+                      AND trigger_definition.tgrelid =
+                          to_regclass('public.messages')
+                      AND NOT trigger_definition.tgisinternal
+                      AND trigger_definition.tgenabled IN ('O', 'A')
+                      AND (trigger_definition.tgtype & 1) = 1
+                      AND (trigger_definition.tgtype & 2) = 2
+                      AND (trigger_definition.tgtype & 4) = 4
+                      AND trigger_definition.tgfoid =
+                          to_regprocedure(
+                            'public.enforce_mediaguide_message_role()'
+                          )
+                  )
+                ) OR (
+                  expected.object_kind = 'policy'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_policies AS policy
+                    WHERE policy.schemaname = 'public'
+                      AND policy.tablename = 'messages'
+                      AND policy.policyname = expected.object_name
+                      AND policy.cmd = 'INSERT'
+                      AND policy.permissive = 'RESTRICTIVE'
+                  )
                 )
                 ORDER BY expected.object_name
               )) AS missing_message_objects,
@@ -275,7 +357,7 @@ describe("Supabase database foundation", () => {
                 WHERE policy.policyname IS NULL
                    OR policy.cmd <> expected.policy_command
                    OR NOT (
-                     policy.roles @> ARRAY['authenticated']::name[]
+                     policy.roles = ARRAY['authenticated']::name[]
                    )
                    OR concat(
                         COALESCE(policy.qual, ''),
@@ -293,10 +375,59 @@ describe("Supabase database foundation", () => {
                      AND (
                        COALESCE(policy.with_check, '')
                          !~* 'role[[:space:]]*=[[:space:]]*''user'''
+                       OR policy.permissive <> 'PERMISSIVE'
+                     )
+                   )
+                   OR (
+                     expected.policy_name = 'messages_insert_owner_guard'
+                     AND policy.permissive <> 'RESTRICTIVE'
+                   )
+                   OR (
+                     expected.policy_command = 'INSERT'
+                     AND NOT EXISTS (
+                       SELECT 1
+                       FROM expected_message_insert_policies AS insert_policy
+                       WHERE insert_policy.policy_name = expected.policy_name
+                         AND insert_policy.expected_permissiveness =
+                             policy.permissive
+                         AND regexp_replace(
+                               lower(
+                                 COALESCE(policy.with_check, '')
+                               ),
+                               '::text|as[[:space:]]+uid|public\.|[[:space:]()]',
+                               '',
+                               'g'
+                             ) = insert_policy.expected_check
                      )
                    )
                 ORDER BY expected.policy_name
               )) AS invalid_ownership_policies,
+              to_json(ARRAY(
+                SELECT policy.policyname
+                FROM pg_policies AS policy
+                WHERE policy.schemaname = 'public'
+                  AND policy.tablename = 'messages'
+                  AND policy.cmd = 'INSERT'
+                  AND policy.policyname NOT IN (
+                    SELECT policy_name
+                    FROM expected_message_insert_policies
+                  )
+                ORDER BY policy.policyname
+              )) AS unexpected_message_insert_policies,
+              to_json(ARRAY(
+                SELECT format(
+                  'authenticated lacks %s on %s',
+                  expected.privilege_name,
+                  expected.relation_name
+                )
+                FROM expected_authenticated_privileges AS expected
+                WHERE NOT has_table_privilege(
+                  'authenticated',
+                  to_regclass(expected.relation_name),
+                  expected.privilege_name
+                )
+                ORDER BY expected.relation_name, expected.privilege_name
+              )) AS missing_authenticated_privileges,
               to_json(ARRAY(
                 SELECT format(
                   '%s has unexpected %s on %s',
@@ -366,6 +497,29 @@ describe("Supabase database foundation", () => {
                   )
                 ORDER BY column_privilege.column_name
               )) AS excess_service_role_column_privileges,
+              to_json(ARRAY(
+                SELECT format(
+                  'service_role effectively has unexpected INSERT on public.messages.%s',
+                  attribute.attname
+                )
+                FROM pg_attribute AS attribute
+                WHERE attribute.attrelid =
+                      to_regclass('public.messages')
+                  AND attribute.attnum > 0
+                  AND NOT attribute.attisdropped
+                  AND has_column_privilege(
+                    'service_role',
+                    to_regclass('public.messages'),
+                    attribute.attname,
+                    'INSERT'
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM expected_service_insert_columns AS expected
+                    WHERE expected.column_name = attribute.attname
+                  )
+                ORDER BY attribute.attname
+              )) AS excess_service_role_effective_insert_columns,
               COALESCE((
                 SELECT attribute.atttypmod <> -1
                 FROM pg_attribute AS attribute
@@ -420,6 +574,10 @@ describe("Supabase database foundation", () => {
             row.invalid_ownership_policies,
             "invalid_ownership_policies",
           ),
+          missing_authenticated_privileges: normalizeStringArray(
+            row.missing_authenticated_privileges,
+            "missing_authenticated_privileges",
+          ),
           public_data_privileges: normalizeStringArray(
             row.public_data_privileges,
             "public_data_privileges",
@@ -436,6 +594,14 @@ describe("Supabase database foundation", () => {
             row.excess_service_role_column_privileges,
             "excess_service_role_column_privileges",
           ),
+          excess_service_role_effective_insert_columns: normalizeStringArray(
+            row.excess_service_role_effective_insert_columns,
+            "excess_service_role_effective_insert_columns",
+          ),
+          unexpected_message_insert_policies: normalizeStringArray(
+            row.unexpected_message_insert_policies,
+            "unexpected_message_insert_policies",
+          ),
           dimension_dependent_indexes: normalizeStringArray(
             row.dimension_dependent_indexes,
             "dimension_dependent_indexes",
@@ -448,6 +614,11 @@ describe("Supabase database foundation", () => {
           ...(checks.excess_service_role_column_privileges.length > 0
             ? [
                 `excess service-role column privileges: ${checks.excess_service_role_column_privileges.join(", ")}`,
+              ]
+            : []),
+          ...(checks.excess_service_role_effective_insert_columns.length > 0
+            ? [
+                `excess effective service-role INSERT privileges: ${checks.excess_service_role_effective_insert_columns.join(", ")}`,
               ]
             : []),
           ...(checks.missing_service_role_privileges.length > 0
@@ -469,6 +640,11 @@ describe("Supabase database foundation", () => {
           ...(checks.invalid_ownership_policies.length > 0
             ? [
                 `missing or invalid ownership policies: ${checks.invalid_ownership_policies.join(", ")}`,
+              ]
+            : []),
+          ...(checks.missing_authenticated_privileges.length > 0
+            ? [
+                `missing authenticated privileges: ${checks.missing_authenticated_privileges.join(", ")}`,
               ]
             : []),
           ...(checks.public_data_privileges.length > 0
@@ -497,6 +673,11 @@ describe("Supabase database foundation", () => {
             ? undefined
             : `PostgreSQL connected, but migration verification failed: ${failures.join("; ")}`,
         ).toEqual([]);
+        if (checks.unexpected_message_insert_policies.length > 0) {
+          console.warn(
+            `Additional public.messages INSERT policies were preserved and require review: ${checks.unexpected_message_insert_policies.join(", ")}`,
+          );
+        }
       } finally {
         await pool.end();
       }
@@ -537,6 +718,7 @@ describe("Supabase row-level security isolation", () => {
       const ownerInsertedMessage = randomUUID();
       const crossUserInsertedMessage = randomUUID();
       const assistantInsertedMessage = randomUUID();
+      const serviceRoleInsertedMessage = randomUUID();
       const ownerIdempotencyKey = randomUUID();
 
       try {
@@ -557,14 +739,6 @@ describe("Supabase row-level security isolation", () => {
            VALUES ($1, $2), ($3, $4)`,
             [conversationA, userA.id, conversationB, userB.id],
           );
-          await client.query(
-            `INSERT INTO public.messages (id, conversation_id, role, content)
-           VALUES
-             ($1, $2, 'user', 'RLS integration fixture'),
-             ($3, $4, 'user', 'RLS integration fixture')`,
-            [messageA, conversationA, messageB, conversationB],
-          );
-
           await client.query("SET LOCAL ROLE authenticated");
           const role = await client.query<{ current_user: string }>(
             "SELECT current_user",
@@ -583,6 +757,20 @@ describe("Supabase row-level security isolation", () => {
               [userId],
             );
           };
+
+          await setAuthenticatedUser(userA.id);
+          await client.query(
+            `INSERT INTO public.messages (id, conversation_id, role, content)
+             VALUES ($1, $2, 'user', 'RLS integration fixture')`,
+            [messageA, conversationA],
+          );
+          await setAuthenticatedUser(userB.id);
+          await client.query(
+            `INSERT INTO public.messages (id, conversation_id, role, content)
+             VALUES ($1, $2, 'user', 'RLS integration fixture')`,
+            [messageB, conversationB],
+          );
+          await setAuthenticatedUser(userA.id);
 
           const expectVisible = async (
             table: "conversations" | "messages" | "user_profiles",
@@ -726,6 +914,17 @@ describe("Supabase row-level security isolation", () => {
           if (ownerMessage.rowCount !== 1) {
             throw new Error("RLS denied a user inserting into their own conversation.");
           }
+          const duplicateMessage = await client.query(
+            `INSERT INTO public.messages
+               (id, conversation_id, role, content, idempotency_key)
+             VALUES ($1, $2, 'user', 'Duplicate idempotency fixture', $3)
+             ON CONFLICT DO NOTHING
+             RETURNING id`,
+            [randomUUID(), conversationA, ownerIdempotencyKey],
+          );
+          if (duplicateMessage.rowCount !== 0) {
+            throw new Error("The message idempotency key was not enforced.");
+          }
 
           await setAuthenticatedUser(userB.id);
           await expectVisible("user_profiles", userB.id, true);
@@ -737,6 +936,87 @@ describe("Supabase row-level security isolation", () => {
           await expectVisible("messages", ownerInsertedMessage, false);
           await expectVisible("messages", crossUserInsertedMessage, false);
           await expectNoCrossUserWrites(userA.id, conversationA, messageA);
+
+          await client.query("RESET ROLE");
+          await client.query("SET LOCAL ROLE service_role");
+          const serviceMessage = await client.query(
+            `INSERT INTO public.messages
+               (id, conversation_id, role, content)
+             VALUES ($1, $2, 'assistant', 'Restricted service-role fixture')`,
+            [serviceRoleInsertedMessage, conversationA],
+          );
+          if (serviceMessage.rowCount !== 1) {
+            throw new Error("The service role could not insert an assistant message.");
+          }
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `INSERT INTO public.messages
+                   (id, conversation_id, role, content)
+                 VALUES ($1, $2, 'user', 'Forbidden service-role fixture')`,
+                [randomUUID(), conversationA],
+              ),
+            "inserting a user message as the service role",
+          );
+
+          await client.query("RESET ROLE");
+          const unauthorizedRole = await client.query<{
+            current_user: string;
+            can_bypass_rls: boolean;
+            has_insert_columns: boolean;
+          }>(`
+            SELECT
+              current_user,
+              role.rolsuper OR role.rolbypassrls AS can_bypass_rls,
+              has_column_privilege(
+                current_user,
+                'public.messages',
+                'id',
+                'INSERT'
+              )
+              AND has_column_privilege(
+                current_user,
+                'public.messages',
+                'conversation_id',
+                'INSERT'
+              )
+              AND has_column_privilege(
+                current_user,
+                'public.messages',
+                'role',
+                'INSERT'
+              )
+              AND has_column_privilege(
+                current_user,
+                'public.messages',
+                'content',
+                'INSERT'
+              ) AS has_insert_columns
+            FROM pg_roles AS role
+            WHERE role.rolname = current_user
+          `);
+          const currentDatabaseRole = unauthorizedRole.rows[0];
+          if (
+            !currentDatabaseRole ||
+            currentDatabaseRole.current_user === "authenticated" ||
+            currentDatabaseRole.current_user === "service_role" ||
+            !currentDatabaseRole.can_bypass_rls ||
+            !currentDatabaseRole.has_insert_columns
+          ) {
+            throw new Error(
+              "The disposable database connection must use a non-application role with RLS bypass and message INSERT privileges to verify rejection by the role trigger.",
+            );
+          }
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `INSERT INTO public.messages
+                   (id, conversation_id, role, content)
+                 VALUES ($1, $2, 'user', 'Unauthorized database-role fixture')`,
+                [randomUUID(), conversationA],
+              ),
+            "inserting a message as an unauthorized database role",
+          );
         } finally {
           try {
             if (transactionStarted) {

@@ -40,6 +40,17 @@ function createTestApp(options: {
   ownerExists?: boolean;
   authenticated?: boolean;
   serviceFailure?: boolean;
+  databaseFailure?: {
+    operation:
+      | "create"
+      | "list"
+      | "retrieve"
+      | "retrieve-messages"
+      | "check-idempotency"
+      | "save-user-message"
+      | "save-assistant-message";
+    code: string;
+  };
 } = {}) {
   const storedMessages: Array<Record<string, unknown>> = [
     {
@@ -61,19 +72,38 @@ function createTestApp(options: {
 
     if (url.pathname.endsWith("/conversations") && method === "GET") {
       const requestedId = url.searchParams.get("id");
+      const failedOperation = requestedId === null ? "list" : "retrieve";
+      if (options.databaseFailure?.operation === failedOperation) {
+        return providerResponse(
+          {
+            code: options.databaseFailure.code,
+            message: "private question and database details",
+          },
+          400,
+        );
+      }
       if (requestedId === `eq.${otherUserConversationId}`) {
         return providerResponse([]);
       }
       if (requestedId) {
         return providerResponse(
-          options.ownerExists === false ? [] : [{ id: conversation.id }],
+          options.ownerExists === false ? [] : [conversation],
         );
       }
       return providerResponse([conversation]);
     }
 
     if (url.pathname.endsWith("/conversations") && method === "POST") {
-      return providerResponse([conversation], 201);
+      if (options.databaseFailure?.operation === "create") {
+        return providerResponse(
+          {
+            code: options.databaseFailure.code,
+            message: "private question and database details",
+          },
+          400,
+        );
+      }
+      return providerResponse(conversation, 201);
     }
 
     if (url.pathname.endsWith("/conversations") && method === "DELETE") {
@@ -87,6 +117,17 @@ function createTestApp(options: {
     if (url.pathname.endsWith("/messages") && method === "GET") {
       const requestedKey = url.searchParams.get("idempotency_key");
       const requestedConversation = url.searchParams.get("conversation_id");
+      const failedOperation =
+        requestedKey === null ? "retrieve-messages" : "check-idempotency";
+      if (options.databaseFailure?.operation === failedOperation) {
+        return providerResponse(
+          {
+            code: options.databaseFailure.code,
+            message: "private question and database details",
+          },
+          400,
+        );
+      }
       const messages = storedMessages.filter(
         (message) =>
           (!requestedConversation ||
@@ -107,6 +148,22 @@ function createTestApp(options: {
       const rows = Array.isArray(payload) ? payload : [payload];
       const role = rows[0]?.role;
       const headers = new Headers(init?.headers ?? requestObject?.headers);
+      const failedOperation =
+        role === "user" ? "save-user-message" : "save-assistant-message";
+      if (
+        (role === "user" ||
+          (role === "assistant" &&
+            headers.get("apikey") === "test-service-role-key")) &&
+        options.databaseFailure?.operation === failedOperation
+      ) {
+        return providerResponse(
+          {
+            code: options.databaseFailure.code,
+            message: "private question and database details",
+          },
+          400,
+        );
+      }
       if (
         role === "assistant" &&
         headers.get("apikey") === "test-service-role-key" &&
@@ -190,6 +247,60 @@ afterEach(() => {
 });
 
 describe("authenticated conversation routes", () => {
+  it("creates, lists, retrieves, and deletes conversations with the user-scoped client", async () => {
+    const { app, fetcher } = createTestApp();
+
+    const created = await request(app)
+      .post("/api/v1/conversations")
+      .send({});
+    const listed = await request(app).get("/api/v1/conversations");
+    const retrieved = await request(app).get(
+      `/api/v1/conversations/${conversation.id}`,
+    );
+    const deleted = await request(app).delete(
+      `/api/v1/conversations/${conversation.id}`,
+    );
+
+    expect(created.status).toBe(201);
+    expect(created.body.conversation).toEqual(conversation);
+    expect(listed.status).toBe(200);
+    expect(listed.body.conversations).toEqual([conversation]);
+    expect(retrieved.status).toBe(200);
+    expect(retrieved.body.conversation).toEqual(conversation);
+    expect(retrieved.body.messages).toHaveLength(1);
+    expect(deleted.status).toBe(204);
+
+    const conversationRequests = fetcher.mock.calls.filter(([input, init]) => {
+      const requestObject = input instanceof Request ? input : null;
+      const url = new URL(requestObject ? requestObject.url : String(input));
+      return (
+        url.pathname.endsWith("/conversations") ||
+        /\/conversations\/[^/]+$/u.test(url.pathname)
+      );
+    });
+    expect(conversationRequests).toHaveLength(4);
+    for (const [input, init] of conversationRequests) {
+      const requestObject = input instanceof Request ? input : null;
+      const headers = new Headers(init?.headers ?? requestObject?.headers);
+      expect(headers.get("apikey")).toBe("test-publishable-key");
+      expect(headers.get("authorization")).toMatch(/^Bearer\s+\S+$/u);
+      expect(headers.get("authorization")).not.toContain(
+        "test-service-role-key",
+      );
+    }
+
+    const [createInput, createInit] = conversationRequests[0];
+    const createRequest =
+      createInput instanceof Request ? createInput : null;
+    const createUrl = new URL(
+      createRequest ? createRequest.url : String(createInput),
+    );
+    expect(createInit?.method ?? createRequest?.method).toBe("POST");
+    expect(createUrl.searchParams.get("select")).toBe(
+      "id,created_at,updated_at",
+    );
+  });
+
   it("uses the user-scoped client for the user's message and the server client for the assistant", async () => {
     const { app, fetcher } = createTestApp();
 
@@ -302,6 +413,97 @@ describe("authenticated conversation routes", () => {
     expect(response.status).toBe(503);
     expect(response.body.code).toBe("AI_SERVICE_UNAVAILABLE");
     expect(messageRequests(fetcher)).toHaveLength(0);
+  });
+
+  it.each([
+    ["create", "42501"],
+    ["list", "42501"],
+    ["retrieve", "42501"],
+    ["retrieve-messages", "42703"],
+    ["check-idempotency", "42703"],
+    ["save-user-message", "42501"],
+    ["save-assistant-message", "42501"],
+  ] as const)(
+    "logs a safe PostgreSQL code for %s failures without database details",
+    async (operation, databaseCode) => {
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { app, answer } = createTestApp({
+        databaseFailure: { operation, code: databaseCode },
+      });
+
+      const response =
+        operation === "create"
+          ? await request(app).post("/api/v1/conversations").send({})
+          : operation === "list"
+            ? await request(app).get("/api/v1/conversations")
+            : operation === "retrieve"
+              ? await request(app).get(
+                  `/api/v1/conversations/${conversation.id}`,
+                )
+              : operation === "retrieve-messages"
+                ? await request(app).get(
+                    `/api/v1/conversations/${conversation.id}`,
+                  )
+                : await request(app)
+                    .post(`/api/v1/conversations/${conversation.id}/messages`)
+                    .set("Idempotency-Key", idempotencyKey)
+                    .send({ question: "What is general health information?" });
+
+      expect(response.status).toBe(503);
+      expect(response.body.code).toBe("CONVERSATION_STORAGE_UNAVAILABLE");
+      expect(errorLog).toHaveBeenCalledWith(
+        "Conversation persistence request failed:",
+        {
+          operation:
+            operation === "retrieve-messages" ? "retrieve" : operation,
+          databaseCode,
+        },
+      );
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain(
+        "private question",
+      );
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain(
+        "database details",
+      );
+      expect(response.text).not.toContain(databaseCode);
+      if (
+        operation === "check-idempotency" ||
+        operation === "retrieve-messages"
+      ) {
+        expect(answer).not.toHaveBeenCalled();
+      } else if (
+        operation === "save-user-message" ||
+        operation === "save-assistant-message"
+      ) {
+        expect(answer).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
+  it("does not log unrecognized database error codes or provider messages", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { app } = createTestApp({
+      databaseFailure: {
+        operation: "retrieve",
+        code: "private details@example.org",
+      },
+    });
+
+    const response = await request(app).get(
+      `/api/v1/conversations/${conversation.id}`,
+    );
+
+    expect(response.status).toBe(503);
+    expect(errorLog).toHaveBeenCalledWith(
+      "Conversation persistence request failed:",
+      { operation: "retrieve", databaseCode: "unavailable" },
+    );
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain(
+      "private question",
+    );
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain(
+      "details@example.org",
+    );
   });
 
   it("retries a failed assistant insert with the same key without duplicating the user message", async () => {
