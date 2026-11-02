@@ -102,6 +102,7 @@ describe("Supabase database foundation", () => {
             missing_message_objects: unknown;
             missing_rls: unknown;
             invalid_ownership_policies: unknown;
+            missing_authenticated_privileges: unknown;
             public_data_privileges: unknown;
             service_role_privileges: unknown;
             missing_service_role_privileges: unknown;
@@ -140,6 +141,19 @@ describe("Supabase database foundation", () => {
                 ('limitations'),
                 ('created_at'),
                 ('idempotency_key')
+            ),
+            expected_authenticated_privileges(
+              relation_name,
+              privilege_name
+            ) AS (
+              VALUES
+                ('public.conversations', 'SELECT'),
+                ('public.conversations', 'INSERT'),
+                ('public.conversations', 'UPDATE'),
+                ('public.conversations', 'DELETE'),
+                ('public.messages', 'SELECT'),
+                ('public.messages', 'INSERT'),
+                ('public.messages', 'DELETE')
             ),
             expected_rls(table_name) AS (
               VALUES
@@ -299,6 +313,20 @@ describe("Supabase database foundation", () => {
               )) AS invalid_ownership_policies,
               to_json(ARRAY(
                 SELECT format(
+                  'authenticated lacks %s on %s',
+                  expected.privilege_name,
+                  expected.relation_name
+                )
+                FROM expected_authenticated_privileges AS expected
+                WHERE NOT has_table_privilege(
+                  'authenticated',
+                  to_regclass(expected.relation_name),
+                  expected.privilege_name
+                )
+                ORDER BY expected.relation_name, expected.privilege_name
+              )) AS missing_authenticated_privileges,
+              to_json(ARRAY(
+                SELECT format(
                   '%s has unexpected %s on %s',
                   'anon',
                   privilege.privilege_name,
@@ -420,6 +448,10 @@ describe("Supabase database foundation", () => {
             row.invalid_ownership_policies,
             "invalid_ownership_policies",
           ),
+          missing_authenticated_privileges: normalizeStringArray(
+            row.missing_authenticated_privileges,
+            "missing_authenticated_privileges",
+          ),
           public_data_privileges: normalizeStringArray(
             row.public_data_privileges,
             "public_data_privileges",
@@ -469,6 +501,11 @@ describe("Supabase database foundation", () => {
           ...(checks.invalid_ownership_policies.length > 0
             ? [
                 `missing or invalid ownership policies: ${checks.invalid_ownership_policies.join(", ")}`,
+              ]
+            : []),
+          ...(checks.missing_authenticated_privileges.length > 0
+            ? [
+                `missing authenticated privileges: ${checks.missing_authenticated_privileges.join(", ")}`,
               ]
             : []),
           ...(checks.public_data_privileges.length > 0
