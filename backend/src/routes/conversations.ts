@@ -39,11 +39,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function getDatabaseErrorCode(error: unknown): string {
+  if (!isRecord(error) || typeof error.code !== "string") {
+    return "unavailable";
+  }
+
+  return /^(?:[0-9A-Z]{5}|PGRST\d{3})$/u.test(error.code)
+    ? error.code
+    : "unavailable";
+}
+
 function sendDatabaseFailure(
   response: Response,
   operation: string,
+  error?: unknown,
 ): void {
-  console.error("Conversation persistence request failed:", { operation });
+  console.error("Conversation persistence request failed:", {
+    operation,
+    databaseCode: getDatabaseErrorCode(error),
+  });
   response.status(503).json({
     status: "error",
     code: "CONVERSATION_STORAGE_UNAVAILABLE",
@@ -147,8 +161,8 @@ export function createConversationsRouter(
         status: "ok",
         conversation: data as ConversationRecord,
       });
-    } catch {
-      sendDatabaseFailure(response, "create");
+    } catch (error) {
+      sendDatabaseFailure(response, "create", error);
     }
   });
 
@@ -179,8 +193,8 @@ export function createConversationsRouter(
         status: "ok",
         conversations: data as ConversationRecord[],
       });
-    } catch {
-      sendDatabaseFailure(response, "list");
+    } catch (error) {
+      sendDatabaseFailure(response, "list", error);
     }
   });
 
@@ -209,7 +223,7 @@ export function createConversationsRouter(
         .maybeSingle();
 
       if (conversationResult.error) {
-        sendDatabaseFailure(response, "retrieve");
+        sendDatabaseFailure(response, "retrieve", conversationResult.error);
         return;
       }
       if (!conversationResult.data) {
@@ -225,7 +239,7 @@ export function createConversationsRouter(
         .order("id", { ascending: true });
 
       if (messagesResult.error || !messagesResult.data) {
-        sendDatabaseFailure(response, "retrieve");
+        sendDatabaseFailure(response, "retrieve", messagesResult.error);
         return;
       }
 
@@ -234,8 +248,8 @@ export function createConversationsRouter(
         conversation: conversationResult.data as ConversationRecord,
         messages: messagesResult.data as MessageRecord[],
       });
-    } catch {
-      sendDatabaseFailure(response, "retrieve");
+    } catch (error) {
+      sendDatabaseFailure(response, "retrieve", error);
     }
   });
 
@@ -266,7 +280,7 @@ export function createConversationsRouter(
         .maybeSingle();
 
       if (conversationResult.error) {
-        sendDatabaseFailure(response, "send-message");
+        sendDatabaseFailure(response, "send-message", conversationResult.error);
         return;
       }
       if (!conversationResult.data) {
@@ -283,7 +297,11 @@ export function createConversationsRouter(
         .order("id", { ascending: true });
 
       if (existingResult.error || !existingResult.data) {
-        sendDatabaseFailure(response, "check-idempotency");
+        sendDatabaseFailure(
+          response,
+          "check-idempotency",
+          existingResult.error,
+        );
         return;
       }
 
@@ -372,7 +390,11 @@ export function createConversationsRouter(
             .order("created_at", { ascending: true })
             .order("id", { ascending: true });
           if (retryResult.error || !retryResult.data) {
-            sendDatabaseFailure(response, "save-user-message");
+            sendDatabaseFailure(
+              response,
+              "save-user-message",
+              retryResult.error ?? error,
+            );
             return;
           }
           savedMessages = retryResult.data as MessageRecord[];
@@ -380,7 +402,7 @@ export function createConversationsRouter(
             (message) => message.role === "user",
           );
           if (!savedUserMessage || savedUserMessage.content !== question) {
-            sendDatabaseFailure(response, "save-user-message");
+            sendDatabaseFailure(response, "save-user-message", error);
             return;
           }
           existingAssistantMessage = savedMessages.find(
@@ -437,7 +459,11 @@ export function createConversationsRouter(
             .order("created_at", { ascending: true })
             .order("id", { ascending: true });
           if (retryResult.error || !retryResult.data) {
-            sendDatabaseFailure(response, "save-assistant-message");
+            sendDatabaseFailure(
+              response,
+              "save-assistant-message",
+              retryResult.error ?? error,
+            );
             return;
           }
           savedMessages = retryResult.data as MessageRecord[];
@@ -445,12 +471,12 @@ export function createConversationsRouter(
             (message) => message.role === "assistant",
           );
           if (!existingAssistantMessage) {
-            sendDatabaseFailure(response, "save-assistant-message");
+            sendDatabaseFailure(response, "save-assistant-message", error);
             return;
           }
         }
-      } catch {
-        sendDatabaseFailure(response, "save-assistant-message");
+      } catch (error) {
+        sendDatabaseFailure(response, "save-assistant-message", error);
         return;
       }
 
@@ -462,7 +488,7 @@ export function createConversationsRouter(
         .order("created_at", { ascending: true })
         .order("id", { ascending: true });
       if (savedResult.error || !savedResult.data) {
-        sendDatabaseFailure(response, "read-saved-messages");
+        sendDatabaseFailure(response, "read-saved-messages", savedResult.error);
         return;
       }
 
@@ -479,8 +505,8 @@ export function createConversationsRouter(
         limitations: existingAssistantMessage?.limitations ?? answer.limitations,
         requestId: answer.requestId ?? requestId,
       });
-    } catch {
-      sendDatabaseFailure(response, "send-message");
+    } catch (error) {
+      sendDatabaseFailure(response, "send-message", error);
     }
   });
 
@@ -510,7 +536,7 @@ export function createConversationsRouter(
         .maybeSingle();
 
       if (error) {
-        sendDatabaseFailure(response, "delete");
+        sendDatabaseFailure(response, "delete", error);
         return;
       }
       if (!data) {
@@ -519,8 +545,8 @@ export function createConversationsRouter(
       }
 
       response.status(204).end();
-    } catch {
-      sendDatabaseFailure(response, "delete");
+    } catch (error) {
+      sendDatabaseFailure(response, "delete", error);
     }
   });
 
