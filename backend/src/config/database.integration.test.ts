@@ -129,7 +129,10 @@ describe("Supabase database foundation", () => {
             expected_message_objects(object_name, object_kind) AS (
               VALUES
                 ('messages_limitations_nonempty', 'constraint'),
-                ('messages_conversation_idempotency_role_idx', 'index')
+                ('messages_conversation_idempotency_role_idx', 'index'),
+                ('enforce_mediaguide_message_role', 'function'),
+                ('mediaguide_enforce_message_role', 'trigger'),
+                ('messages_insert_owner_guard', 'policy')
             ),
             expected_service_insert_columns(column_name) AS (
               VALUES
@@ -179,6 +182,7 @@ describe("Supabase database foundation", () => {
                 ('conversations', 'conversations_delete_own', 'DELETE', 'user_id'),
                 ('messages', 'messages_select_own_conversation', 'SELECT', 'conversation_id'),
                 ('messages', 'messages_insert_own_conversation', 'INSERT', 'conversation_id'),
+                ('messages', 'messages_insert_owner_guard', 'INSERT', 'conversation_id'),
                 ('messages', 'messages_delete_own_conversation', 'DELETE', 'conversation_id')
             ),
             private_relations(relation_name) AS (
@@ -264,6 +268,32 @@ describe("Supabase database foundation", () => {
                   AND to_regclass(
                     format('public.%I', expected.object_name)
                   ) IS NULL
+                ) OR (
+                  expected.object_kind = 'function'
+                  AND to_regprocedure(
+                    format('public.%I()', expected.object_name)
+                  ) IS NULL
+                ) OR (
+                  expected.object_kind = 'trigger'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_trigger AS trigger_definition
+                    WHERE trigger_definition.tgname = expected.object_name
+                      AND trigger_definition.tgrelid =
+                          to_regclass('public.messages')
+                      AND NOT trigger_definition.tgisinternal
+                  )
+                ) OR (
+                  expected.object_kind = 'policy'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_policies AS policy
+                    WHERE policy.schemaname = 'public'
+                      AND policy.tablename = 'messages'
+                      AND policy.policyname = expected.object_name
+                      AND policy.cmd = 'INSERT'
+                      AND policy.permissive = 'RESTRICTIVE'
+                  )
                 )
                 ORDER BY expected.object_name
               )) AS missing_message_objects,
@@ -308,6 +338,10 @@ describe("Supabase database foundation", () => {
                        COALESCE(policy.with_check, '')
                          !~* 'role[[:space:]]*=[[:space:]]*''user'''
                      )
+                   )
+                   OR (
+                     expected.policy_name = 'messages_insert_owner_guard'
+                     AND policy.permissive <> 'RESTRICTIVE'
                    )
                 ORDER BY expected.policy_name
               )) AS invalid_ownership_policies,
@@ -574,6 +608,7 @@ describe("Supabase row-level security isolation", () => {
       const ownerInsertedMessage = randomUUID();
       const crossUserInsertedMessage = randomUUID();
       const assistantInsertedMessage = randomUUID();
+      const serviceRoleInsertedMessage = randomUUID();
       const ownerIdempotencyKey = randomUUID();
 
       try {
@@ -594,14 +629,6 @@ describe("Supabase row-level security isolation", () => {
            VALUES ($1, $2), ($3, $4)`,
             [conversationA, userA.id, conversationB, userB.id],
           );
-          await client.query(
-            `INSERT INTO public.messages (id, conversation_id, role, content)
-           VALUES
-             ($1, $2, 'user', 'RLS integration fixture'),
-             ($3, $4, 'user', 'RLS integration fixture')`,
-            [messageA, conversationA, messageB, conversationB],
-          );
-
           await client.query("SET LOCAL ROLE authenticated");
           const role = await client.query<{ current_user: string }>(
             "SELECT current_user",
@@ -620,6 +647,20 @@ describe("Supabase row-level security isolation", () => {
               [userId],
             );
           };
+
+          await setAuthenticatedUser(userA.id);
+          await client.query(
+            `INSERT INTO public.messages (id, conversation_id, role, content)
+             VALUES ($1, $2, 'user', 'RLS integration fixture')`,
+            [messageA, conversationA],
+          );
+          await setAuthenticatedUser(userB.id);
+          await client.query(
+            `INSERT INTO public.messages (id, conversation_id, role, content)
+             VALUES ($1, $2, 'user', 'RLS integration fixture')`,
+            [messageB, conversationB],
+          );
+          await setAuthenticatedUser(userA.id);
 
           const expectVisible = async (
             table: "conversations" | "messages" | "user_profiles",
@@ -763,6 +804,17 @@ describe("Supabase row-level security isolation", () => {
           if (ownerMessage.rowCount !== 1) {
             throw new Error("RLS denied a user inserting into their own conversation.");
           }
+          const duplicateMessage = await client.query(
+            `INSERT INTO public.messages
+               (id, conversation_id, role, content, idempotency_key)
+             VALUES ($1, $2, 'user', 'Duplicate idempotency fixture', $3)
+             ON CONFLICT DO NOTHING
+             RETURNING id`,
+            [randomUUID(), conversationA, ownerIdempotencyKey],
+          );
+          if (duplicateMessage.rowCount !== 0) {
+            throw new Error("The message idempotency key was not enforced.");
+          }
 
           await setAuthenticatedUser(userB.id);
           await expectVisible("user_profiles", userB.id, true);
@@ -774,6 +826,28 @@ describe("Supabase row-level security isolation", () => {
           await expectVisible("messages", ownerInsertedMessage, false);
           await expectVisible("messages", crossUserInsertedMessage, false);
           await expectNoCrossUserWrites(userA.id, conversationA, messageA);
+
+          await client.query("RESET ROLE");
+          await client.query("SET LOCAL ROLE service_role");
+          const serviceMessage = await client.query(
+            `INSERT INTO public.messages
+               (id, conversation_id, role, content)
+             VALUES ($1, $2, 'assistant', 'Restricted service-role fixture')`,
+            [serviceRoleInsertedMessage, conversationA],
+          );
+          if (serviceMessage.rowCount !== 1) {
+            throw new Error("The service role could not insert an assistant message.");
+          }
+          await expectPermissionDenied(
+            () =>
+              client.query(
+                `INSERT INTO public.messages
+                   (id, conversation_id, role, content)
+                 VALUES ($1, $2, 'user', 'Forbidden service-role fixture')`,
+                [randomUUID(), conversationA],
+              ),
+            "inserting a user message as the service role",
+          );
         } finally {
           try {
             if (transactionStarted) {
