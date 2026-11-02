@@ -41,7 +41,14 @@ function createTestApp(options: {
   authenticated?: boolean;
   serviceFailure?: boolean;
   databaseFailure?: {
-    operation: "retrieve" | "check-idempotency";
+    operation:
+      | "create"
+      | "list"
+      | "retrieve"
+      | "retrieve-messages"
+      | "check-idempotency"
+      | "save-user-message"
+      | "save-assistant-message";
     code: string;
   };
 } = {}) {
@@ -65,6 +72,16 @@ function createTestApp(options: {
 
     if (url.pathname.endsWith("/conversations") && method === "GET") {
       const requestedId = url.searchParams.get("id");
+      const failedOperation = requestedId === null ? "list" : "retrieve";
+      if (options.databaseFailure?.operation === failedOperation) {
+        return providerResponse(
+          {
+            code: options.databaseFailure.code,
+            message: "private question and database details",
+          },
+          400,
+        );
+      }
       if (requestedId === `eq.${otherUserConversationId}`) {
         return providerResponse([]);
       }
@@ -77,6 +94,15 @@ function createTestApp(options: {
     }
 
     if (url.pathname.endsWith("/conversations") && method === "POST") {
+      if (options.databaseFailure?.operation === "create") {
+        return providerResponse(
+          {
+            code: options.databaseFailure.code,
+            message: "private question and database details",
+          },
+          400,
+        );
+      }
       return providerResponse(conversation, 201);
     }
 
@@ -92,7 +118,7 @@ function createTestApp(options: {
       const requestedKey = url.searchParams.get("idempotency_key");
       const requestedConversation = url.searchParams.get("conversation_id");
       const failedOperation =
-        requestedKey === null ? "retrieve" : "check-idempotency";
+        requestedKey === null ? "retrieve-messages" : "check-idempotency";
       if (options.databaseFailure?.operation === failedOperation) {
         return providerResponse(
           {
@@ -122,6 +148,22 @@ function createTestApp(options: {
       const rows = Array.isArray(payload) ? payload : [payload];
       const role = rows[0]?.role;
       const headers = new Headers(init?.headers ?? requestObject?.headers);
+      const failedOperation =
+        role === "user" ? "save-user-message" : "save-assistant-message";
+      if (
+        (role === "user" ||
+          (role === "assistant" &&
+            headers.get("apikey") === "test-service-role-key")) &&
+        options.databaseFailure?.operation === failedOperation
+      ) {
+        return providerResponse(
+          {
+            code: options.databaseFailure.code,
+            message: "private question and database details",
+          },
+          400,
+        );
+      }
       if (
         role === "assistant" &&
         headers.get("apikey") === "test-service-role-key" &&
@@ -374,8 +416,13 @@ describe("authenticated conversation routes", () => {
   });
 
   it.each([
-    ["retrieve", "42703"],
-    ["check-idempotency", "42501"],
+    ["create", "42501"],
+    ["list", "42501"],
+    ["retrieve", "42501"],
+    ["retrieve-messages", "42703"],
+    ["check-idempotency", "42703"],
+    ["save-user-message", "42501"],
+    ["save-assistant-message", "42501"],
   ] as const)(
     "logs a safe PostgreSQL code for %s failures without database details",
     async (operation, databaseCode) => {
@@ -385,18 +432,32 @@ describe("authenticated conversation routes", () => {
       });
 
       const response =
-        operation === "retrieve"
-          ? await request(app).get(`/api/v1/conversations/${conversation.id}`)
-          : await request(app)
-              .post(`/api/v1/conversations/${conversation.id}/messages`)
-              .set("Idempotency-Key", idempotencyKey)
-              .send({ question: "What is general health information?" });
+        operation === "create"
+          ? await request(app).post("/api/v1/conversations").send({})
+          : operation === "list"
+            ? await request(app).get("/api/v1/conversations")
+            : operation === "retrieve"
+              ? await request(app).get(
+                  `/api/v1/conversations/${conversation.id}`,
+                )
+              : operation === "retrieve-messages"
+                ? await request(app).get(
+                    `/api/v1/conversations/${conversation.id}`,
+                  )
+                : await request(app)
+                    .post(`/api/v1/conversations/${conversation.id}/messages`)
+                    .set("Idempotency-Key", idempotencyKey)
+                    .send({ question: "What is general health information?" });
 
       expect(response.status).toBe(503);
       expect(response.body.code).toBe("CONVERSATION_STORAGE_UNAVAILABLE");
       expect(errorLog).toHaveBeenCalledWith(
         "Conversation persistence request failed:",
-        { operation, databaseCode },
+        {
+          operation:
+            operation === "retrieve-messages" ? "retrieve" : operation,
+          databaseCode,
+        },
       );
       expect(JSON.stringify(errorLog.mock.calls)).not.toContain(
         "private question",
@@ -405,8 +466,16 @@ describe("authenticated conversation routes", () => {
         "database details",
       );
       expect(response.text).not.toContain(databaseCode);
-      if (operation === "check-idempotency") {
+      if (
+        operation === "check-idempotency" ||
+        operation === "retrieve-messages"
+      ) {
         expect(answer).not.toHaveBeenCalled();
+      } else if (
+        operation === "save-user-message" ||
+        operation === "save-assistant-message"
+      ) {
+        expect(answer).toHaveBeenCalledOnce();
       }
     },
   );

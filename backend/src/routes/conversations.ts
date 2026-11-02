@@ -153,7 +153,7 @@ export function createConversationsRouter(
         .single();
 
       if (error || !data) {
-        sendDatabaseFailure(response, "create");
+        sendDatabaseFailure(response, "create", error);
         return;
       }
 
@@ -185,7 +185,7 @@ export function createConversationsRouter(
         .order("id", { ascending: true });
 
       if (error || !data) {
-        sendDatabaseFailure(response, "list");
+        sendDatabaseFailure(response, "list", error);
         return;
       }
 
