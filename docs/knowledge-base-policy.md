@@ -25,6 +25,28 @@ A source must be assessed for relevance, authority, publication date, evidence q
 
 The appearance of a source on this list does not mean its individual documents have already been approved.
 
+### Candidate source licensing status (not approval)
+
+- WHO is an authoritative candidate publisher. Its [copyright policy](https://www.who.int/about/policies/publishing/copyright)
+  states that WHO publications are generally under CC BY-NC-SA 3.0 IGO for
+  non-commercial use, but third-party credited content may have separate
+  rights, document-specific notices govern, and commercial use requires
+  permission.
+- A specific review candidate is WHO's [Malaria fact sheet](https://www.who.int/news-room/fact-sheets/detail/malaria)
+  (publisher: World Health Organization). Its individual publication/update
+  date and any credited third-party material still require document-level
+  verification; it is not approved or ingested.
+- Ethiopia's Ministry of Health ([moh.gov.et](https://www.moh.gov.et/)) is an
+  authoritative local candidate. A reuse license or permission basis for
+  individual documents has not been verified; its materials are not eligible
+  for retrieval until that is documented.
+
+For the WHO candidate, confirm its current date, applicable reuse notice, and
+any third-party material before recording it in the source registry. If
+MediGuide is operated commercially, obtain permission before using WHO content.
+These are candidates only. No individual document license review, source
+approval, or production corpus is represented as completed.
+
 ## 3. Source Approval Process
 
 Before a document enters the approved knowledge base:
@@ -175,21 +197,28 @@ event, citation metadata, and section headings on text chunks. The database
 schema has a license field and prevents new approved rows without a license;
 retrieval views exclude approved rows whose license is unknown. An optional
 local manifest can load operator-supplied Markdown or plain text at service
-startup; the loader does not fetch documents, approve sources, or persist
-chunks to a database.
+startup; the loader does not fetch documents or approve sources. Optional
+PostgreSQL/pgvector storage is implemented: indexing requires a matching
+pre-existing database approval, licensed source metadata, a full-document
+checksum, and an explicitly configured embeddings API. The adapter does not
+create database source approvals.
 
 The AI service has BM25-style local lexical retrieval and returns selected
 sentences verbatim with citation metadata carried by the retrieved chunks. It
-abstains when no relevant passage is found. Embedding-provider and vector-store
-interfaces are present, with an in-memory vector implementation for tests,
-but no embedding model or Supabase pgvector adapter is configured. The current
-service does not persist chunks between restarts.
+abstains when no relevant passage is found, excludes source records explicitly
+marked outdated, and detects only a narrow class of direct negation conflicts.
+It cannot reliably detect all evidence conflicts or determine currency from
+publication dates. The vector provider, async PostgreSQL store, schema
+migration, and embedding API client are implemented, but no provider, database
+connection, or approved production source corpus is configured. Embeddings
+are not generated and chunks are not persisted in the current default runtime.
 
 No production source documents or approval records are currently available to
 the AI service, so its default runtime abstains. The response path is
 extractive, not LLM-generated, and has not been clinically or retrieval-
-quality validated. Persistent AI-service storage, a configured embedding
-implementation, end-to-end citation evaluation, and clinical review remain
-outstanding. No source should be considered approved merely because this
-policy or test fixtures exist, and the project must not claim to provide a
-clinically validated service.
+quality validated. Operational database credentials/privilege verification,
+a configured embedding provider, licensed and individually approved documents,
+end-to-end retrieval evaluation, and clinical review remain outstanding. No
+source should be considered approved merely because this policy or test
+fixtures exist, and the project must not claim to provide a clinically
+validated service.

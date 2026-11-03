@@ -1,5 +1,7 @@
 import re
 
+from pydantic import AnyHttpUrl, TypeAdapter
+
 from app.rag.chunking import validate_approved_chunk
 from app.rag.retrieval import Retriever, terms
 from app.schemas.health_education import (
@@ -8,6 +10,12 @@ from app.schemas.health_education import (
 )
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+_HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
+_NEGATION_TERMS = {"no", "not", "never", "cannot"}
+_OUTDATED_LIMITATION = re.compile(
+    r"\b(outdated|superseded|expired|withdrawn|retired|needs?\s+updat(?:e|ing))\b",
+    re.IGNORECASE,
+)
 _PERSONAL_CLINICAL_REQUEST = re.compile(
     r"\b("
     r"diagnos(?:e|is|ing)\s+(?:me|my|this)|"
@@ -61,13 +69,20 @@ class HealthAssistant:
         passages = await self._retriever.retrieve(question, limit=3)
         excerpts: list[tuple[str, CitationSource]] = []
         seen: set[tuple[str, str]] = set()
+        candidate_sentences: list[str] = []
         source_limitations: list[str] = []
 
         for passage in passages:
             validate_approved_chunk(passage.chunk)
+            if any(
+                _OUTDATED_LIMITATION.search(limitation)
+                for limitation in passage.chunk.source_metadata.limitations
+            ):
+                continue
             sentence = _select_supported_sentence(passage.chunk.text, question)
             if not sentence:
                 continue
+            candidate_sentences.append(sentence)
             citation = passage.chunk.citation
             citation_key = (citation.source_id, citation.section)
             if citation_key in seen:
@@ -83,7 +98,7 @@ class HealthAssistant:
                         sourceId=citation.source_id,
                         title=citation.title,
                         publisher=citation.publisher,
-                        url=citation.url,
+                        url=_HTTP_URL_ADAPTER.validate_python(citation.url),
                         section=citation.section or None,
                     ),
                 )
@@ -91,22 +106,11 @@ class HealthAssistant:
             if len(excerpts) == 3:
                 break
 
+        if _contains_explicit_contradiction(candidate_sentences):
+            return _abstention_response(request_id)
+
         if not excerpts:
-            return HealthEducationResponse(
-                answer=(
-                    "I couldn't find relevant information in the approved "
-                    "sources currently available to this service. Please "
-                    "consult a qualified healthcare professional or an "
-                    "authoritative health source."
-                ),
-                language="en",
-                citations=[],
-                limitations=[
-                    "No relevant approved source passage was retrieved.",
-                    "This service does not provide diagnosis or personalized treatment.",
-                ],
-                requestId=request_id,
-            )
+            return _abstention_response(request_id)
 
         answer = "Retrieved source passages:\n\n" + "\n\n".join(
             excerpt for excerpt, _citation in excerpts
@@ -140,3 +144,40 @@ def _select_supported_sentence(text: str, question: str) -> str | None:
     if not supported:
         return None
     return max(supported, key=lambda result: result[0])[1]
+
+
+def _contains_explicit_contradiction(sentences: list[str]) -> bool:
+    claims: dict[tuple[str, ...], bool] = {}
+    for sentence in sentences:
+        words = re.findall(r"[a-z0-9]+", sentence.lower())
+        normalized = tuple(
+            term
+            for term in terms(sentence)
+            if term not in _NEGATION_TERMS
+        )
+        if len(normalized) < 2:
+            continue
+        negated = any(word in _NEGATION_TERMS for word in words)
+        previous = claims.get(normalized)
+        if previous is not None and previous != negated:
+            return True
+        claims[normalized] = negated
+    return False
+
+
+def _abstention_response(request_id: str) -> HealthEducationResponse:
+    return HealthEducationResponse(
+        answer=(
+            "I couldn't find sufficiently reliable, consistent information "
+            "in the approved sources currently available to this service. "
+            "Please consult a qualified healthcare professional or an "
+            "authoritative health source."
+        ),
+        language="en",
+        citations=[],
+        limitations=[
+            "No sufficiently relevant and consistent approved source passage was available.",
+            "This service does not provide diagnosis or personalized treatment.",
+        ],
+        requestId=request_id,
+    )

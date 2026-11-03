@@ -75,10 +75,39 @@ async def test_empty_approved_corpus_returns_an_explicit_abstention() -> None:
     assert response.headers.get("X-Request-ID")
     assert response.json()["citations"] == []
     assert response.json()["requestId"] == response.headers["X-Request-ID"]
-    assert "couldn't find relevant information" in response.json()["answer"]
-    assert "No relevant approved source passage was retrieved." in response.json()[
-        "limitations"
-    ]
+    assert "couldn't find sufficiently reliable" in response.json()["answer"]
+    assert (
+        "No sufficiently relevant and consistent approved source passage was available."
+        in response.json()["limitations"]
+    )
+
+
+@pytest.mark.anyio
+async def test_uninitialized_persistent_retrieval_fails_closed() -> None:
+    service = create_app(
+        Settings(
+            app_env="testing",
+            ai_service_token=SecretStr("test-internal-token"),
+            knowledge_database_url=SecretStr(
+                "postgresql://test:test@localhost:5432/mediguide"
+            ),
+            embedding_api_url="http://localhost:9000/v1/embeddings",
+            embedding_api_key=SecretStr("test-embedding-key"),
+            embedding_model="fixture-model",
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=service),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/health-education",
+            json={"question": "What is malaria?"},
+            headers={"X-Internal-Service-Token": "test-internal-token"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Health education service is unavailable."
 
 
 @pytest.mark.anyio

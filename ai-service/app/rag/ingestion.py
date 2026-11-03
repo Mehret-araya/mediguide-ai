@@ -1,4 +1,6 @@
 import hashlib
+from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 from app.rag.chunking import DocumentChunk, chunk_document
@@ -15,7 +17,7 @@ _MAX_DOCUMENT_CHARS = 1_000_000
 def ingest_document(
     text: str,
     source: HealthSourceRecord | dict[str, Any],
-    audit_history: list[ReviewAuditEvent | dict[str, Any]],
+    audit_history: Sequence[ReviewAuditEvent | dict[str, Any]],
 ) -> list[DocumentChunk]:
     """Chunk operator-supplied text only after registry approval is verified."""
     approved_source, approval = require_approved_source(source, audit_history)
@@ -31,4 +33,8 @@ def ingest_document(
             "Document checksum does not match the approved source record."
         )
 
-    return chunk_document(text, approved_source, approval)
+    document_checksum = approved_source.checksum or f"sha256:{checksum}"
+    return [
+        replace(chunk, document_checksum=document_checksum)
+        for chunk in chunk_document(text, approved_source, approval)
+    ]

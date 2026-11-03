@@ -68,9 +68,11 @@ login, token refresh, logout, current-user lookup, and authenticated account
 deletion routes. It also includes PostgreSQL connection configuration, a
 source-review foundation, a responsive website with Supabase Auth flows, and
 a FastAPI AI service with source-gated local ingestion, lexical retrieval, and
-extractive answering. No approved production documents are configured, so the
-AI service abstains by default; it has no configured embedding model, pgvector
-adapter, or LLM. The database foundation and authenticated conversation API
+extractive answering. An optional embedding provider and PostgreSQL/pgvector
+adapter now persist and search approved, checksum-verified source chunks when
+explicitly configured; they are not configured by default. No approved
+production documents are configured, so the AI service abstains by default.
+The database foundation and authenticated conversation API
 and migrations have been applied and tested against local Supabase. The local
 two-user RLS behavior test was previously reported passing; the account
 deletion integration test also passes locally and verifies the Auth user,
@@ -170,7 +172,10 @@ key reuse message rows rather than duplicating them. The later
 `supabase/migrations/20261103000000_source_license_metadata.sql` migration
 adds source-license metadata and excludes previously approved sources whose
 license is unknown from retrieval views. These migrations are additive and do
-not rewrite the earlier migration history.
+not rewrite the earlier migration history. The
+`supabase/migrations/20261104000000_persistent_vector_embeddings.sql`
+migration adds model/dimension metadata for persisted vectors without fixing
+the vector dimension or changing existing approval policies.
 Persistence failure logs include only the operation and an allowlisted
 PostgreSQL/PostgREST error code, never the database message or submitted
 question. A `42703` code indicates a missing database column; verify that both

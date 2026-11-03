@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
 
@@ -14,6 +14,12 @@ def test_settings_use_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "DEBUG",
         "LOG_LEVEL",
         "KNOWLEDGE_BASE_MANIFEST",
+        "KNOWLEDGE_DATABASE_URL",
+        "KNOWLEDGE_DATABASE_SSL_CA",
+        "EMBEDDING_API_URL",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_TIMEOUT_SECONDS",
         "AI_SERVICE_TOKEN",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -77,6 +83,63 @@ def test_settings_load_optional_env_file(tmp_path: Path) -> None:
 
     assert settings.app_name == "File Configured Service"
     assert settings.app_env == "testing"
+
+
+def test_persistent_retrieval_requires_all_provider_and_database_settings() -> None:
+    with pytest.raises(ValidationError, match="requires the database URL"):
+        Settings(
+            _env_file=None,
+            knowledge_database_url=SecretStr(
+                "postgresql://test:test@localhost:5432/mediguide"
+            ),
+        )
+
+
+def test_persistent_retrieval_accepts_complete_loopback_configuration() -> None:
+    settings = Settings(
+        _env_file=None,
+        knowledge_database_url=SecretStr(
+            "postgresql://test:test@localhost:5432/mediguide"
+        ),
+        embedding_api_url="http://localhost:9000/v1/embeddings",
+        embedding_api_key=SecretStr("test-embedding-key"),
+        embedding_model="fixture-model",
+    )
+
+    assert settings.embedding_model == "fixture-model"
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "https://db.example.invalid",
+        "postgresql://",
+    ],
+)
+def test_persistent_retrieval_rejects_non_postgresql_database_urls(
+    database_url: str,
+) -> None:
+    with pytest.raises(ValidationError, match="PostgreSQL connection URL"):
+        Settings(
+            _env_file=None,
+            knowledge_database_url=SecretStr(database_url),
+            embedding_api_url="https://embedding.example/v1/embeddings",
+            embedding_api_key=SecretStr("fixture-key"),
+            embedding_model="fixture-model",
+        )
+
+
+def test_persistent_retrieval_rejects_database_sslmode_overrides() -> None:
+    with pytest.raises(ValidationError, match="service enforces TLS"):
+        Settings(
+            _env_file=None,
+            knowledge_database_url=SecretStr(
+                "postgresql://test:test@db.example.invalid/mediguide?sslmode=disable"
+            ),
+            embedding_api_url="https://embedding.example/v1/embeddings",
+            embedding_api_key=SecretStr("fixture-key"),
+            embedding_model="fixture-model",
+        )
 
 
 @pytest.mark.parametrize(

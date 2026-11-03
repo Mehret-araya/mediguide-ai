@@ -29,6 +29,8 @@ class DocumentChunk:
     citation: SourceCitation
     source_metadata: HealthSourceRecord
     approval_event: ReviewAuditEvent
+    chunk_index: int = 0
+    document_checksum: str | None = None
 
 
 def validate_approved_chunk(chunk: DocumentChunk) -> None:
@@ -145,6 +147,7 @@ def chunk_document(
                     ),
                     source_metadata=source,
                     approval_event=approval_event,
+                    chunk_index=index,
                 )
             )
     return chunks

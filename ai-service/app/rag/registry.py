@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import date
 from enum import StrEnum
 from typing import Any
@@ -73,7 +74,7 @@ class SourceNotApprovedError(ValueError):
 
 def require_approved_source(
     source: HealthSourceRecord | dict[str, Any],
-    audit_history: list[ReviewAuditEvent | dict[str, Any]],
+    audit_history: Sequence[ReviewAuditEvent | dict[str, Any]],
 ) -> tuple[HealthSourceRecord, ReviewAuditEvent]:
     """Match the backend registry's latest-audit-event eligibility rule."""
     record = (
