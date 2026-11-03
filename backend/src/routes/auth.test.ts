@@ -395,8 +395,13 @@ describe("Supabase-backed authentication routes", () => {
       .set("Authorization", `Bearer ${session.accessToken}`)
       .send({ userId: "attacker-selected-user" });
 
-
     expect(response.status).toBe(204);
+    expect(response.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("mediguide_access=;"),
+        expect.stringContaining("mediguide_refresh=;"),
+      ]),
+    );
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({
       apikey: "test-anon-key",
@@ -409,6 +414,52 @@ describe("Supabase-backed authentication routes", () => {
       apikey: "test-service-role-key",
       authorization: "Bearer test-service-role-key",
     });
+  });
+
+  it("keeps authentication cookies when Supabase rejects account deletion", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(providerResponse(session.user))
+      .mockResolvedValueOnce(
+        providerResponse({ message: "sensitive provider details" }, 500),
+      );
+    const app = createTestApp(fetcher);
+
+    const response = await request(app)
+      .delete("/api/v1/auth/account")
+      .set("Authorization", `Bearer ${session.accessToken}`);
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      status: "error",
+      code: "AUTH_UNAVAILABLE",
+      message: "The account could not be deleted. Please try again later.",
+    });
+    expect(response.headers["set-cookie"]).toBeUndefined();
+    expect(response.text).not.toContain("sensitive provider details");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps authentication cookies when Supabase account deletion has a network error", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(providerResponse(session.user))
+      .mockRejectedValueOnce(new Error("sensitive network details"));
+    const app = createTestApp(fetcher);
+
+    const response = await request(app)
+      .delete("/api/v1/auth/account")
+      .set("Authorization", `Bearer ${session.accessToken}`);
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      status: "error",
+      code: "AUTH_UNAVAILABLE",
+      message: "The authentication service is temporarily unavailable.",
+    });
+    expect(response.headers["set-cookie"]).toBeUndefined();
+    expect(response.text).not.toContain("sensitive network details");
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("does not delete an account when its session cannot be verified", async () => {

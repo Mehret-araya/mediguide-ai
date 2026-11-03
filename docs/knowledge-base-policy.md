@@ -31,12 +31,14 @@ Before a document enters the approved knowledge base:
 
 1. Identify the publisher and original source.
 2. Record the document title and original URL.
-3. Record its publication date and last review date when available.
-4. Assess the source's authority and relevance to the intended health topic.
-5. Check whether the content is current enough for its intended use.
-6. Identify limitations, conflicting recommendations, and jurisdiction-specific guidance.
-7. Record the approval status and reviewer.
-8. Exclude documents that cannot be verified or do not meet the project's quality requirements.
+3. Record the publication date and last update date when available.
+4. Record the applicable license or permission basis and its terms. Do not
+   infer permission from public accessibility.
+5. Assess the source's authority and relevance to the intended health topic.
+6. Check whether the content is current enough for its intended use.
+7. Identify limitations, conflicting recommendations, and jurisdiction-specific guidance.
+8. Record the approval status and reviewer.
+9. Exclude documents whose provenance, reuse rights, or quality cannot be verified.
 
 High-risk clinical content requires appropriate qualified review before it is used to support safety-critical guidance.
 
@@ -48,6 +50,7 @@ Each source record should include, where applicable:
 - Document title
 - Publisher or organization
 - Original URL
+- License or documented permission basis
 - Publication date
 - Last updated date
 - Date accessed
@@ -167,10 +170,13 @@ Test results must be recorded. Do not claim that retrieval or citation accuracy 
 The backend contains a source registry and review workflow. The AI service
 contains an ingestion path that enforces the registry's approval status and
 approval audit evidence, verifies an optional content checksum, and preserves
-the full source record, approval event, citation metadata, and section
-headings on text chunks. An optional local manifest can load operator-supplied
-Markdown or plain text at service startup; the loader does not fetch documents,
-approve sources, or persist chunks to a database.
+the full source record, including its required license metadata, approval
+event, citation metadata, and section headings on text chunks. The database
+schema has a license field and prevents new approved rows without a license;
+retrieval views exclude approved rows whose license is unknown. An optional
+local manifest can load operator-supplied Markdown or plain text at service
+startup; the loader does not fetch documents, approve sources, or persist
+chunks to a database.
 
 The AI service has BM25-style local lexical retrieval and returns selected
 sentences verbatim with citation metadata carried by the retrieved chunks. It
@@ -182,8 +188,8 @@ service does not persist chunks between restarts.
 No production source documents or approval records are currently available to
 the AI service, so its default runtime abstains. The response path is
 extractive, not LLM-generated, and has not been clinically or retrieval-
-quality validated. Persistent storage, a configured embedding implementation,
-end-to-end citation evaluation, and clinical review remain outstanding. No
-source should be considered approved merely because this policy or test
-fixtures exist, and the project must not claim to provide a clinically
-validated service.
+quality validated. Persistent AI-service storage, a configured embedding
+implementation, end-to-end citation evaluation, and clinical review remain
+outstanding. No source should be considered approved merely because this
+policy or test fixtures exist, and the project must not claim to provide a
+clinically validated service.

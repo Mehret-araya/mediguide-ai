@@ -43,7 +43,9 @@ function AuthStateProbe() {
         password: 'a-test-password',
       })}>Register</button>
       <button onClick={() => void auth.signOut()}>Sign out</button>
-      <button onClick={() => void auth.deleteAccount()}>Delete account</button>
+      <button onClick={() => {
+        void auth.deleteAccount().catch(() => undefined)
+      }}>Delete account</button>
     </div>
   )
 }
@@ -180,5 +182,27 @@ describe('AuthProvider browser session state', () => {
     expect(screen.getByTestId('notice').textContent).toContain(
       'account deletion request was completed',
     )
+  })
+
+  it('preserves local identity when account deletion fails', async () => {
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(authApi.deleteAccount).mockRejectedValue(
+      new Error('Account deletion could not be completed.'),
+    )
+
+    renderProvider()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('status').textContent).toBe('authenticated')
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error').textContent).toBe(
+        'Account deletion could not be completed.',
+      )
+    })
+    expect(screen.getByTestId('status').textContent).toBe('authenticated')
+    expect(screen.getByTestId('user').textContent).toBe(user.email)
   })
 })

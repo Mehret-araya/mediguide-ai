@@ -99,4 +99,10 @@ Successful software tests alone do not establish clinical safety or effectivenes
 
 ## 10. Current Status
 
-This document describes planned requirements. It does not mean the features have been implemented, tested, or clinically validated.
+Authentication, account deletion, conversation history, source-gated
+extractive health education, and a fail-closed facility endpoint exist in the
+repository. There is no approved production health corpus or verified Addis
+Ababa facility dataset. Deterministic emergency guidance, clinical review,
+production rate-limiting, backup recovery verification, and deployment remain
+incomplete. Requirements above are not evidence of production readiness or
+clinical validity.

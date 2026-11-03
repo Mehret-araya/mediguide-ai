@@ -1,13 +1,96 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
+import express from "express";
 import pg from "pg";
+import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { requireAuthenticatedUser } from "../auth/require-auth.js";
 import { SupabaseAuthClient } from "../auth/supabase-auth.js";
+import { createUserSupabaseClient } from "../auth/user-supabase-client.js";
 import { createDatabasePoolConfig } from "./database-options.js";
+import { createConversationsRouter } from "../routes/conversations.js";
 
 const integrationEnabled = process.env.RUN_DATABASE_INTEGRATION === "true";
 const rlsIntegrationEnabled =
   process.env.RUN_DATABASE_RLS_INTEGRATION === "true";
+const accountDeletionIntegrationEnabled =
+  process.env.RUN_LOCAL_ACCOUNT_DELETION_INTEGRATION === "true";
+const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function assertLoopbackUrl(value: string | undefined, variable: string): URL {
+  if (!value) {
+    throw new Error(`${variable} must be configured for local account deletion integration.`);
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${variable} must be a valid loopback URL.`);
+  }
+
+  if (!localHosts.has(url.hostname)) {
+    throw new Error(`${variable} must point to a loopback host; refusing non-local deletion.`);
+  }
+  return url;
+}
+
+async function createLocalAuthUser(
+  supabaseUrl: URL,
+  serviceRoleKey: string,
+  email: string,
+  password: string,
+): Promise<string> {
+  const response = await fetch(new URL("/auth/v1/admin/users", supabaseUrl), {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      authorization: `Bearer ${serviceRoleKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ email, password, email_confirm: true }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Local Supabase could not create the disposable account (HTTP ${response.status}).`,
+    );
+  }
+
+  const payload: unknown = await response.json();
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("id" in payload) ||
+    typeof payload.id !== "string"
+  ) {
+    throw new Error("Local Supabase returned an invalid disposable account.");
+  }
+  return payload.id;
+}
+
+async function deleteLocalAuthUser(
+  supabaseUrl: URL,
+  serviceRoleKey: string,
+  userId: string,
+): Promise<void> {
+  const response = await fetch(
+    new URL(`/auth/v1/admin/users/${encodeURIComponent(userId)}`, supabaseUrl),
+    {
+      method: "DELETE",
+      headers: {
+        apikey: serviceRoleKey,
+        authorization: `Bearer ${serviceRoleKey}`,
+      },
+    },
+  );
+
+  if (!response.ok && response.status !== 404) {
+    throw new Error(
+      `Local Supabase could not clean up the disposable account (HTTP ${response.status}).`,
+    );
+  }
+}
 
 function normalizeStringArray(value: unknown, column: string): string[] {
   let parsed = value;
@@ -127,6 +210,7 @@ describe("Supabase database foundation", () => {
             ),
             expected_columns(table_name, column_name) AS (
               VALUES
+                ('health_sources', 'license'),
                 ('messages', 'limitations'),
                 ('messages', 'idempotency_key')
             ),
@@ -683,6 +767,175 @@ describe("Supabase database foundation", () => {
         }
       } finally {
         await pool.end();
+      }
+    },
+  );
+});
+
+describe("Local Supabase account deletion cascade", () => {
+  it.skipIf(!accountDeletionIntegrationEnabled)(
+    "deletes only a disposable local account and blocks its former session",
+    async () => {
+      const supabaseUrl = assertLoopbackUrl(
+        process.env.SUPABASE_URL,
+        "SUPABASE_URL",
+      );
+      assertLoopbackUrl(
+        process.env.DATABASE_URL,
+        "DATABASE_URL",
+      );
+      const anonKey = process.env.SUPABASE_ANON_KEY;
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!anonKey || !serviceRoleKey) {
+        throw new Error(
+          "SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are required for local account deletion integration.",
+        );
+      }
+
+      const databasePool = new pg.Pool(
+        createDatabasePoolConfig({
+          ...process.env,
+          DATABASE_SSL: "false",
+        }),
+      );
+      const auth = new SupabaseAuthClient(() => ({
+        SUPABASE_URL: supabaseUrl.origin,
+        SUPABASE_ANON_KEY: anonKey,
+        SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+      }));
+      const conversationId = randomUUID();
+      const messageId = randomUUID();
+      const email = `account-deletion-${randomUUID()}@example.test`;
+      const password = randomUUID();
+      let createdUserId: string | null = null;
+      let deletionSucceeded = false;
+
+      try {
+        await databasePool.query("SELECT 1");
+        createdUserId = await createLocalAuthUser(
+          supabaseUrl,
+          serviceRoleKey,
+          email,
+          password,
+        );
+        const session = await auth.login(email, password);
+        expect(session.user.id).toBe(createdUserId);
+
+        const profile = await databasePool.query(
+          "SELECT id FROM public.user_profiles WHERE id = $1",
+          [createdUserId],
+        );
+        expect(profile.rowCount).toBe(1);
+
+        await databasePool.query(
+          `INSERT INTO public.conversations (id, user_id)
+           VALUES ($1, $2)`,
+          [conversationId, createdUserId],
+        );
+        const fixtureClient = await databasePool.connect();
+        try {
+          await fixtureClient.query("BEGIN");
+          await fixtureClient.query("SET LOCAL ROLE authenticated");
+          await fixtureClient.query(
+            "SELECT set_config('request.jwt.claim.sub', $1, true)",
+            [createdUserId],
+          );
+          await fixtureClient.query(
+            `INSERT INTO public.messages (id, conversation_id, role, content)
+             VALUES ($1, $2, 'user', 'Synthetic local account deletion fixture')`,
+            [messageId, conversationId],
+          );
+          await fixtureClient.query("COMMIT");
+        } catch (error) {
+          await fixtureClient.query("ROLLBACK");
+          throw error;
+        } finally {
+          fixtureClient.release();
+        }
+
+        const app = express();
+        app.use(
+          "/api/v1/conversations",
+          createConversationsRouter(
+            undefined,
+            requireAuthenticatedUser(auth, (accessToken) =>
+              createUserSupabaseClient(accessToken, {
+                SUPABASE_URL: supabaseUrl.origin,
+                SUPABASE_ANON_KEY: anonKey,
+              }),
+            ),
+          ),
+        );
+        const beforeDeletion = await request(app)
+          .get("/api/v1/conversations")
+          .set("Authorization", `Bearer ${session.accessToken}`);
+        expect(beforeDeletion.status).toBe(200);
+        expect(
+          beforeDeletion.body.conversations.some(
+            (conversation: { id: string }) =>
+              conversation.id === conversationId,
+          ),
+        ).toBe(true);
+
+        await auth.deleteUser(createdUserId);
+        deletionSucceeded = true;
+
+        await expect(auth.getUser(session.accessToken)).resolves.toBeNull();
+        const afterDeletion = await request(app)
+          .get("/api/v1/conversations")
+          .set("Authorization", `Bearer ${session.accessToken}`);
+        expect(afterDeletion.status).toBe(401);
+        expect(afterDeletion.body.code).toBe("UNAUTHORIZED");
+
+        const remainingRecords = await databasePool.query<{
+          profiles: string;
+          conversations: string;
+          messages: string;
+        }>(
+          `SELECT
+             (SELECT count(*) FROM public.user_profiles WHERE id = $1)::text AS profiles,
+             (SELECT count(*) FROM public.conversations WHERE id = $2)::text AS conversations,
+             (SELECT count(*) FROM public.messages WHERE id = $3)::text AS messages`,
+          [createdUserId, conversationId, messageId],
+        );
+        expect(remainingRecords.rows[0]).toEqual({
+          profiles: "0",
+          conversations: "0",
+          messages: "0",
+        });
+      } finally {
+        try {
+          if (!deletionSucceeded) {
+            const cleanupUserId =
+              createdUserId ??
+              (
+                await databasePool.query<{ id: string }>(
+                  "SELECT id FROM auth.users WHERE email = $1",
+                  [email],
+                )
+              ).rows[0]?.id;
+            if (cleanupUserId) {
+              await deleteLocalAuthUser(
+                supabaseUrl,
+                serviceRoleKey,
+                cleanupUserId,
+              );
+            }
+          }
+        } finally {
+          try {
+            await databasePool.query(
+              "DELETE FROM public.messages WHERE id = $1",
+              [messageId],
+            );
+            await databasePool.query(
+              "DELETE FROM public.conversations WHERE id = $1",
+              [conversationId],
+            );
+          } finally {
+            await databasePool.end();
+          }
+        }
       }
     },
   );

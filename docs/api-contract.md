@@ -268,10 +268,9 @@ The current education endpoints use the response formats implemented by the back
 
 ## 6. Conversation History
 
-The conversation-history endpoints in this section are **planned and not yet implemented**.
-
-**Implementation status: Implemented in Express and frontend; database write
-policy requires the follow-up migration.**
+**Implementation status: Implemented in Express and frontend.** The local
+Supabase migrations and deletion cascade integration have been applied and
+tested locally; hosted-project behavior has not been verified.
 
 All conversation routes require a verified Supabase Auth user. Database
 operations use the request-scoped Supabase client carrying that user's JWT;
@@ -545,24 +544,16 @@ Passing these tests does not establish clinical safety, medical accuracy, or pro
 
 ## 14. Current Status
 
-This document describes both the current implementation and planned API behavior.
+Implemented API areas include authentication/account deletion,
+owner-scoped conversation operations, the Express-to-private-AI-service proxy,
+facility search validation with a fail-closed unavailable response, and
+illustrative education examples. Unit tests cover principal request and
+failure behavior; local database integration covers schema and account
+deletion cascades. The facility endpoint has no configured provider or
+verified records. The AI corpus is empty by default and abstains.
 
-Currently implemented and tested:
-
-- `GET /health`
-- `GET /api/v1/education`
-- `GET /api/v1/education/:id`
-
-The education endpoints return illustrative examples only. They are not clinically reviewed or approved for production use.
-
-Still planned or requiring further implementation and validation:
-
-- Persistent account-related data and production token storage in the website.
-- AI-powered health questions and approved-source citations.
-- Conversation history, ownership enforcement, and deletion.
-- Healthcare facility discovery using verified data.
-- Consistent standard error responses across the API.
-- The protected backend-to-AI-service interface.
-- Additional validation, rate limiting, security checks, and release evaluations.
-
-An endpoint must not be described as operational merely because it appears in this document. Implementation, automated tests, and any applicable security, privacy, and clinical review requirements must be evaluated separately.
+Still incomplete or unverified: hosted Supabase integration, production
+rate-limiting, consistent error envelopes across every endpoint, verified
+facility data, production health sources, clinical emergency safeguards,
+backup restoration, monitoring, and deployment. Documentation does not
+supersede testing or clinical review.

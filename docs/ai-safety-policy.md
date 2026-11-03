@@ -166,6 +166,17 @@ If qualified review is unavailable, continue development of general health educa
 
 ## 14. Current Status
 
-This document defines planned AI safety behavior. It does not establish that MediGuide AI is clinically validated, safe for diagnosis, or suitable for emergency decision-making.
+The AI service implements a limited pattern-based refusal for selected
+individual diagnosis and personal medication, dose, and treatment-change
+requests; approval-gated lexical retrieval; extractive sentence selection;
+citation metadata validation; and abstention when no relevant approved
+passage is available. These technical controls are not a complete or
+clinically validated safety system.
 
-The relevant controls must be implemented, tested, documented, and reviewed before the application makes claims about their effectiveness.
+There is no production source corpus, LLM, persistent vector retrieval, or
+deterministic emergency detector. No emergency rules have been clinically
+reviewed. The illustrative education endpoint is not approved clinical
+content. The app must not be presented as clinically validated, safe for
+diagnosis, or suitable for emergency decision-making. Potential emergency
+handling and all release claims require qualified clinical review and
+appropriate evaluation.

@@ -15,6 +15,7 @@ const pendingSource: HealthSourceRecord = {
   title: "Example health document",
   publisher: "Example Publisher",
   url: "https://example.org/health-document",
+  license: "Synthetic test fixture license",
   accessedDate: "2026-10-17",
   language: "en",
   topics: ["general-health"],

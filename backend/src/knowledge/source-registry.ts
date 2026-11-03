@@ -15,6 +15,7 @@ export interface HealthSourceRecord {
   title: string;
   publisher: string;
   url: string;
+  license: string;
 
   publicationDate?: string;
   updatedDate?: string;
@@ -113,6 +114,7 @@ export function validateSourceRecord(
     "id",
     "title",
     "publisher",
+    "license",
     "accessedDate",
     "language",
   ] as const;

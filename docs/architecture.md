@@ -148,30 +148,19 @@ The following decisions require further documentation before production use or i
 
 ## 10. Current Status
 
-The repository currently contains an Express backend, a PostgreSQL pool
-configuration that verifies TLS certificates by default, Supabase Auth API
-routes, and a FastAPI AI-service process-health endpoint. Auth supports
-registration, login, refresh, logout, current-user lookup, and authenticated
-account deletion. Both API processes start locally and their health endpoints
-respond. The project reports that PostgreSQL connectivity now succeeds with
-verified TLS; it was not re-tested against the live database during this
-change. The backend supports a trusted Supabase CA file through
-`DATABASE_SSL_CA`; certificate verification must not be disabled for the
-hosted database. Auth routes have
-automated mocked-provider tests, and the website uses HttpOnly-cookie auth
-flows, but no live Supabase Auth configuration was available for integration
-testing. The AI service now has source-gated local document ingestion,
-BM25-style lexical retrieval, and an extractive response path. No approved
-production sources are loaded; the default service abstains. An embedding
-provider, Supabase pgvector retrieval adapter, and persistent application-level
-knowledge ingestion remain unimplemented. The repository now has a Supabase
-migration foundation for auth-linked profiles, source approval history, source
-chunks with optional pgvector embeddings, and owner-scoped conversations and
-messages with RLS. These migrations have not been applied or tested against
-the hosted project. The project reports the migration failed while creating a
-vector index on a dimensionless vector column; the database still lacks the
-expected migrated objects. This change corrects that migration but does not
-apply or live-test it.
-Clinical validation, deterministic emergency safeguards, and production
-deployment also remain outstanding. This document does not mean that the
-services have been clinically validated or deployed.
+The repository contains a React/Vite frontend, Express API, FastAPI health
+education service, and Supabase/PostgreSQL migrations. Authentication,
+conversation history, user-scoped RLS, account deletion, and a private
+backend-to-AI-service route are implemented. The local Supabase schema and
+disposable-account deletion cascade test pass; this is not evidence of hosted
+project behavior. PostgreSQL TLS verification is enabled by default for
+remote databases, with a CA path supported through `DATABASE_SSL_CA`.
+
+The AI service uses approved-manifest-gated local text ingestion, BM25-style
+lexical retrieval, and extractive answers. It has no production source corpus,
+LLM, embedding provider, persistent pgvector retrieval adapter, or
+clinically-reviewed deterministic emergency logic. The facility provider
+interface fails closed because no verified dataset is configured. API
+rate-limiting, production hosting, monitoring, backups/restoration, and
+clinical review remain release blockers. No service is deployed or clinically
+validated.

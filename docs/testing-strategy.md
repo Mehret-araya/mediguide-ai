@@ -205,6 +205,18 @@ Safety-critical content requires appropriate clinical review before it is presen
 
 ## 15. Current Status
 
-This document defines the planned testing strategy.
+The repository has backend Vitest tests, frontend Vitest tests, and AI-service
+Pytest tests. Opt-in PostgreSQL checks inspect the migrated schema and can
+exercise two-user RLS behavior. The account-deletion integration is separately
+guarded by `RUN_LOCAL_ACCOUNT_DELETION_INTEGRATION=true` and refuses
+non-loopback Supabase and database URLs. It creates a disposable local Auth
+user, verifies profile/conversation/message cascades and protected endpoint
+rejection, and cleans up fixture data. These tests do not test hosted
+production configuration.
 
-Test suites, evaluation datasets, security checks, and clinical review processes must be implemented and completed before their results can be claimed.
+No measured retrieval/citation evaluation dataset, adversarial prompt-injection
+suite, provider integration, rate-limit test, full-stack deployed integration,
+backup restoration test, or clinically reviewed emergency evaluation is
+available. Passing software tests do not establish clinical safety or
+effectiveness. Run and report each test command separately; do not infer
+coverage for checks that were skipped or not configured.

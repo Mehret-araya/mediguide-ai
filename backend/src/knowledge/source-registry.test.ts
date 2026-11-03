@@ -11,6 +11,7 @@ const pendingSource: HealthSourceRecord = {
   title: "Example health document",
   publisher: "Example Publisher",
   url: "https://example.org/health-document",
+  license: "Synthetic test fixture license",
   accessedDate: "2026-10-17",
   language: "en",
   topics: ["general-health"],
@@ -31,6 +32,23 @@ describe("Health source registry", () => {
 
     expect(validateSourceRecord(source)).toContain(
       "url must be a valid HTTPS URL.",
+    );
+  });
+
+  it("requires explicit license metadata", () => {
+    const source = { ...pendingSource, license: " " };
+
+    expect(validateSourceRecord(source)).toContain(
+      "license must be a non-empty string.",
+    );
+  });
+
+  it("rejects a missing license field", () => {
+    const source = { ...pendingSource } as Partial<HealthSourceRecord>;
+    delete source.license;
+
+    expect(validateSourceRecord(source)).toContain(
+      "license must be a non-empty string.",
     );
   });
 

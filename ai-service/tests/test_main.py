@@ -129,6 +129,7 @@ async def test_answer_uses_a_retrieved_passage_and_its_verified_metadata(
         "id": "test-source",
         "title": "Synthetic test document",
         "publisher": "Test publisher",
+        "license": "Synthetic test fixture license",
         "url": "https://example.org/test",
         "accessedDate": "2026-10-17",
         "language": "en",
@@ -211,6 +212,8 @@ async def test_answer_uses_a_retrieved_passage_and_its_verified_metadata(
         "Do I have malaria?",
         "What dosage should I take?",
         "Which medicine should I take?",
+        "Should I stop taking my medication?",
+        "Can I change my insulin dose?",
     ],
 )
 async def test_personal_clinical_request_is_refused_without_citations(
