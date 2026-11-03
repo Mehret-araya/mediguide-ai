@@ -110,20 +110,20 @@ Legal and regulatory obligations must be assessed for the intended deployment lo
 
 ## 14. Current Status
 
-This plan is not evidence that all safeguards are in place. The backend now delegates account registration, authentication, token
-refresh, logout, identity lookup, and account deletion to Supabase Auth. The
-service-role key is used only server-side for account deletion and inserting
-validated assistant messages; it is never used for ordinary user-owned
-queries or exposed to the frontend. Authenticated users can insert only their
-own `user` messages under RLS. The backend must verify conversation ownership
-before privileged assistant insertion because the service role bypasses RLS.
-Passwords, service credentials, and provider error details are not logged or
-returned. Automated tests use mocked
-provider responses, and no live Supabase Auth configuration was available for
-integration testing. The frontend sends credentialed requests and does not
-access session tokens from JavaScript; production deployment must use HTTPS
-and same-site frontend/API origins for `SameSite=Lax` cookies. Conversation
-routes use the verified user's request-scoped Supabase client and enforce
-ownership with RLS; the two-user behavior test is implemented but has not yet
-been verified against the hosted database. A retention policy, deployment
-rate-limiting, and production security controls still require review.
+This plan is not evidence that all safeguards are in place. The backend
+delegates account registration, authentication, token refresh, logout,
+identity lookup, and account deletion to Supabase Auth. The service-role key
+is used only server-side for account deletion and validated assistant-message
+insertion; it is not exposed to the frontend or used for ordinary user-owned
+queries. Conversation ownership is checked before privileged assistant
+insertion. Authenticated users can insert only their own `user` messages under
+RLS. Local integration tests now verify the deletion cascade and protected
+endpoint rejection for a disposable account; provider failure paths are
+covered by mocked tests. The hosted project has not been tested.
+
+The frontend sends credentialed requests and does not access session tokens
+from JavaScript; production must use HTTPS and suitable same-site origins for
+`SameSite=Lax` cookies. Deployment rate limiting/abuse controls, a retention
+policy, backup protection and restoration testing, incident response, and
+production security configuration remain incomplete. No production deployment
+or independent security audit has occurred.

@@ -55,8 +55,11 @@ MediGuide AI is not clinically validated and is not a substitute for professiona
 - `frontend/` — React web application
 - `backend/` — application API
 - `ai-service/` — AI and knowledge retrieval
-- `database/` — reserved for planned database migrations
+- `supabase/` — local Supabase configuration and ordered database migrations
 - `docs/` — project documentation
+
+Deployment blockers and environment preparation are summarized in
+[`docs/deployment.md`](./docs/deployment.md).
 
 ## 8. Current Milestone
 
@@ -68,12 +71,18 @@ a FastAPI AI service with source-gated local ingestion, lexical retrieval, and
 extractive answering. No approved production documents are configured, so the
 AI service abstains by default; it has no configured embedding model, pgvector
 adapter, or LLM. The database foundation and authenticated conversation API
-are implemented, but the follow-up message-write migration and two-user RLS
-behavior test still require verification on the intended Supabase project.
-Verified Addis Ababa facility data and clinically reviewed emergency rules
-are not available. The facility API/provider interface and empty-state search
-are implemented, but the endpoint intentionally returns unavailable until an
-authoritative dataset is supplied.
+and migrations have been applied and tested against local Supabase. The local
+two-user RLS behavior test was previously reported passing; the account
+deletion integration test also passes locally and verifies the Auth user,
+profile, conversation, message, and protected-endpoint behavior using a
+disposable account. No hosted-project integration or production-data test has
+been performed. Source registry records now require license metadata, but no
+production source corpus is approved. Verified Addis Ababa facility data and
+clinically reviewed emergency rules are not available. The facility
+API/provider interface and empty-state search are implemented, but the
+endpoint intentionally returns unavailable until an authoritative dataset is
+supplied. Rate limiting, backups/restoration, production hosting, and clinical
+review remain release blockers.
 
 ### Backend authentication setup
 
@@ -89,10 +98,11 @@ The backend exposes `/api/v1/auth/register`, `/login`, `/refresh`, `/logout`,
 access token for non-browser clients. The website is connected through
 credentialed requests and the backend's HttpOnly access/refresh cookies; token
 values are not exposed to browser JavaScript or stored in local storage.
-Account deletion removes the Supabase Auth identity; the database foreign-key
-cascade deletes the user's profile and conversations when both tracked
-migrations are applied. This behavior must be verified against the intended
-Supabase project before production use.
+Account deletion removes the Supabase Auth identity; database foreign-key
+cascades delete the user's profile, conversations, and messages when the
+tracked migrations are applied. An opt-in local integration test verifies
+these cascades and protected-endpoint rejection using a disposable account.
+Hosted-project behavior and backup-retention behavior remain unverified.
 
 In local development, the frontend uses Vite's `/api` proxy to reach the
 Express service on `127.0.0.1:5000`; keep `VITE_API_URL` blank for this setup.
@@ -156,8 +166,11 @@ limitations field, then
 adds idempotency, restricts authenticated inserts to `role = 'user'`, and
 grants the server role only column-level `INSERT` needed for assistant
 responses. The API requires a UUID `Idempotency-Key`; retries with the same
-key reuse message rows rather than duplicating them. The later migration is
-additive and does not rewrite the earlier migration's history.
+key reuse message rows rather than duplicating them. The later
+`supabase/migrations/20261103000000_source_license_metadata.sql` migration
+adds source-license metadata and excludes previously approved sources whose
+license is unknown from retrieval views. These migrations are additive and do
+not rewrite the earlier migration history.
 Persistence failure logs include only the operation and an allowlisted
 PostgreSQL/PostgREST error code, never the database message or submitted
 question. A `42703` code indicates a missing database column; verify that both
@@ -171,7 +184,10 @@ Database security checks remain opt-in with `npm run test:database` after
 setting `RUN_DATABASE_INTEGRATION=true` and/or
 `RUN_DATABASE_RLS_INTEGRATION=true` in a safe local process environment. The
 RLS behavior test requires two dedicated non-production Supabase users and
-must not be pointed at production data.
+must not be pointed at production data. The account-deletion cascade test
+requires `RUN_LOCAL_ACCOUNT_DELETION_INTEGRATION=true`; it rejects
+non-loopback Supabase and PostgreSQL URLs and creates only its own disposable
+local user.
 
 After authenticating the Supabase CLI and linking the intended project, apply
 the tracked migrations with `npx supabase db push` from the repository root.
@@ -246,10 +262,42 @@ their access tokens only in a local process environment, never in chat,
 source files, shell history, or logs. The behavior test has not yet been run
 against the hosted database.
 
+To apply pending migrations and run the local schema and account-deletion
+integration tests, start Supabase locally with `npx supabase start`, then run
+this from the repository root. Status credentials are assigned only to the
+current process and are not printed:
+
+```powershell
+$local = npm exec -- supabase status --output json | ConvertFrom-Json
+$env:SUPABASE_URL = $local.API_URL
+$env:SUPABASE_ANON_KEY = $local.ANON_KEY
+$env:SUPABASE_SERVICE_ROLE_KEY = $local.SERVICE_ROLE_KEY
+$env:DATABASE_URL = $local.DB_URL
+$env:DATABASE_SSL = "false"
+$env:RUN_DATABASE_INTEGRATION = "true"
+$env:RUN_LOCAL_ACCOUNT_DELETION_INTEGRATION = "true"
+try {
+  npm exec -- supabase migration up
+  Set-Location backend
+  npm run test:database
+} finally {
+  Remove-Item Env:SUPABASE_URL, Env:SUPABASE_ANON_KEY,
+    Env:SUPABASE_SERVICE_ROLE_KEY, Env:DATABASE_URL,
+    Env:DATABASE_SSL, Env:RUN_DATABASE_INTEGRATION,
+    Env:RUN_LOCAL_ACCOUNT_DELETION_INTEGRATION `
+    -ErrorAction SilentlyContinue
+}
+```
+
+The deletion test creates an `example.test` account, inserts synthetic
+profile/conversation/message fixtures, verifies endpoint access before
+deletion, checks that the Auth token is rejected afterward, confirms all
+three record types are gone, and cleans up fixture rows and any account left
+by a failed test. It does not use or require a production account.
+
 Run the backend from its directory with `npm run dev`. Its `/health` endpoint
 checks the API process only; live PostgreSQL connectivity is a separate
-dependency check. The project reports that verified database connectivity now
-works and the foundation schema was checked previously; the follow-up
-conversation-write migration has not yet been verified on the hosted project.
-The opt-in test above verifies connectivity and migration state; it never
-applies migrations.
+dependency check. The opt-in database test verifies connectivity and
+migration state; it never applies migrations. The local schema and account
+deletion integration tests passed after applying the tracked migrations to
+the local stack. The hosted project remains unverified.
