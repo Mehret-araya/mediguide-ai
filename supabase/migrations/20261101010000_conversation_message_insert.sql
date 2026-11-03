@@ -55,8 +55,8 @@ BEGIN
 
     IF constraint_oid IS NOT NULL THEN
         SELECT regexp_replace(
-            lower(pg_get_expr(conbin, conrelid)),
-            '[\s()]',
+            lower(pg_get_constraintdef(constraint_oid)),
+            'check|[[:space:]()]',
             '',
             'g'
         )

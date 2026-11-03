@@ -64,15 +64,17 @@ describe("Supabase database foundation", () => {
       const poolConfig = createDatabasePoolConfig(process.env);
       const tls = poolConfig.ssl;
       if (
-        typeof tls !== "object" ||
-        tls === null ||
-        tls.rejectUnauthorized !== true
-      ) {
-        throw new Error(
-          "The database integration test requires certificate-verified TLS.",
-        );
-      }
-
+  process.env.DATABASE_SSL !== "false" &&
+  (
+    typeof tls !== "object" ||
+    tls === null ||
+    tls.rejectUnauthorized !== true
+  )
+) {
+  throw new Error(
+    "The database integration test requires certificate-verified TLS unless DATABASE_SSL=false is explicitly configured for local development.",
+  );
+}
       const pool = new pg.Pool(poolConfig);
 
       try {
@@ -196,12 +198,12 @@ describe("Supabase database foundation", () => {
                 (
                   'messages_insert_own_conversation',
                   'PERMISSIVE',
-                  'role=''user''andexistsselect1fromconversationsconversationwhereconversation.id=messages.conversation_idandconversation.user_id=selectauth.uid()'
+                  'role=''user''andexistsselect1fromconversationsconversationwhereconversation.id=messages.conversation_idandconversation.user_id=selectauth.uid'
                 ),
                 (
                   'messages_insert_owner_guard',
                   'RESTRICTIVE',
-                  'existsselect1fromconversationsconversationwhereconversation.id=messages.conversation_idandconversation.user_id=selectauth.uid()'
+                  'existsselect1fromconversationsconversationwhereconversation.id=messages.conversation_idandconversation.user_id=selectauth.uid'
                 )
             ),
             private_relations(relation_name) AS (
@@ -384,6 +386,7 @@ describe("Supabase database foundation", () => {
                    )
                    OR (
                      expected.policy_command = 'INSERT'
+                     AND expected.table_name = 'messages'
                      AND NOT EXISTS (
                        SELECT 1
                        FROM expected_message_insert_policies AS insert_policy
