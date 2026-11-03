@@ -30,6 +30,7 @@ def chunk(chunk_id: str, text: str) -> DocumentChunk:
             id=f"source-{chunk_id}",
             title=f"Test source {chunk_id}",
             publisher="Test publisher",
+            license="Synthetic test fixture license",
             url="https://example.org/source",
             accessedDate="2026-10-17",
             language="en",

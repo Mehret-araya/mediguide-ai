@@ -17,6 +17,7 @@ def manifest_entry(
             "id": "test-manifest-source",
             "title": "Synthetic manifest fixture",
             "publisher": "Test publisher",
+            "license": "Synthetic test fixture license",
             "url": "https://example.org/manifest-fixture",
             "accessedDate": "2026-10-17",
             "language": "en",
@@ -63,6 +64,7 @@ def test_manifest_loads_approved_local_text_and_preserves_source_data(
     assert chunks[0].text == "A synthetic approved passage."
     assert chunks[0].citation.title == "Synthetic manifest fixture"
     assert chunks[0].approval_event.reason == "Synthetic test approval only."
+    assert chunks[0].source_metadata.license == "Synthetic test fixture license"
     assert chunks[0].source_metadata.limitations == [
         "Synthetic fixture; not a medical source."
     ]

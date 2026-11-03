@@ -18,6 +18,7 @@ _PERSONAL_CLINICAL_REQUEST = re.compile(
     r"should\s+i\s+take|"
     r"how\s+much\b.{0,40}\b(?:medicine|medication|drug)|"
     r"which\s+(?:medicine|medication|drug)\b.{0,40}\b(?:take|use|for\s+me)|"
+    r"(?:should|can|could|may)\s+i\s+(?:start|stop|change|adjust|increase|decrease|skip|switch|double|halve)\s+(?:(?:taking|using)\s+)?(?:my\s+)?(?:[a-z-]+\s+){0,3}(?:medicine|medication|drug|dose|dosage)\b|"
     r"recommend\b.{0,40}\b(?:medicine|medication|drug)\b.{0,30}\bfor\s+me|"
     r"prescribe(?:\s+me)?|"
     r"treat\s+my\s+(?:condition|symptom)|"
@@ -45,9 +46,9 @@ class HealthAssistant:
         if _PERSONAL_CLINICAL_REQUEST.search(question):
             return HealthEducationResponse(
                 answer=(
-                    "I can't diagnose an individual or recommend a personal "
-                    "medicine or dose. Please discuss your situation with a "
-                    "qualified healthcare professional."
+                    "I can't diagnose an individual or make personal "
+                    "medicine, dose, or treatment decisions. Please discuss "
+                    "your situation with a qualified healthcare professional."
                 ),
                 language="en",
                 citations=[],

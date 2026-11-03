@@ -16,6 +16,7 @@ def source_record(**overrides: object) -> dict[str, object]:
         "id": "test-source-001",
         "title": "Test health document",
         "publisher": "Test publisher",
+        "license": "Synthetic test fixture license",
         "url": "https://example.org/test-document",
         "accessedDate": "2026-10-17",
         "language": "en",
@@ -67,6 +68,7 @@ def test_ingestion_preserves_registry_metadata_and_section_citations() -> None:
     assert chunks[0].citation.url == "https://example.org/test-document"
     assert chunks[0].citation.section == "Overview"
     assert chunks[0].source_metadata.review_status.value == "approved"
+    assert chunks[0].source_metadata.license == "Synthetic test fixture license"
     assert chunks[0].source_metadata.limitations == [
         "Synthetic fixture; not a medical source."
     ]
@@ -83,6 +85,14 @@ def test_ingestion_rejects_http_source_urls() -> None:
     with pytest.raises(ValidationError, match="must use HTTPS"):
         require_approved_source(
             source_record(url="http://example.org/test-document"),
+            approval_audit(),
+        )
+
+
+def test_ingestion_requires_source_license_metadata() -> None:
+    with pytest.raises(ValidationError, match="license"):
+        require_approved_source(
+            source_record(license=" "),
             approval_audit(),
         )
 

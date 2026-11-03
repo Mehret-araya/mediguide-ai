@@ -23,6 +23,7 @@ class HealthSourceRecord(BaseModel):
     id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     publisher: str = Field(min_length=1)
+    license: str = Field(min_length=1)
     url: AnyHttpUrl
     publication_date: date | None = Field(default=None, alias="publicationDate")
     updated_date: date | None = Field(default=None, alias="updatedDate")
