@@ -201,7 +201,11 @@ startup; the loader does not fetch documents or approve sources. Optional
 PostgreSQL/pgvector storage is implemented: indexing requires a matching
 pre-existing database approval, licensed source metadata, a full-document
 checksum, and an explicitly configured embeddings API. The adapter does not
-create database source approvals.
+create database source approvals. A dedicated `NOLOGIN`, `NOBYPASSRLS`
+database role limits the AI service to approved source data and chunk
+insert/update; it cannot modify approvals or access private account and
+conversation tables. Deployment must create a separate server-only login with
+only that role membership and verify its effective grants.
 
 The AI service has BM25-style local lexical retrieval and returns selected
 sentences verbatim with citation metadata carried by the retrieved chunks. It
