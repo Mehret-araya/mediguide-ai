@@ -175,7 +175,17 @@ license is unknown from retrieval views. These migrations are additive and do
 not rewrite the earlier migration history. The
 `supabase/migrations/20261104000000_persistent_vector_embeddings.sql`
 migration adds model/dimension metadata for persisted vectors without fixing
-the vector dimension or changing existing approval policies.
+the vector dimension or changing existing approval policies. The follow-up
+`supabase/migrations/20261104010000_knowledge_reader_role.sql` migration adds
+a dedicated `NOLOGIN`, `NOBYPASSRLS` knowledge-reader role and scoped RLS
+policies for optional AI-service retrieval/indexing. Configure a separate
+server-only login as a member of that role for `KNOWLEDGE_DATABASE_URL`; do
+not use the Supabase `service_role` or a frontend credential. The role cannot
+read user profiles, conversations, or messages, mutate source approvals, or
+delete chunks. The follow-up
+`supabase/migrations/20261104020000_restrict_service_role_knowledge_access.sql`
+removes the unused broad knowledge-table grants from Supabase `service_role`;
+the backend still retains its separately constrained assistant-message insert.
 Persistence failure logs include only the operation and an allowlisted
 PostgreSQL/PostgREST error code, never the database message or submitted
 question. A `42703` code indicates a missing database column; verify that both
