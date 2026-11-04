@@ -190,9 +190,13 @@ describe("Supabase database foundation", () => {
             missing_authenticated_privileges: unknown;
             public_data_privileges: unknown;
             service_role_privileges: unknown;
+            excess_service_role_sequence_privileges: unknown;
             missing_service_role_privileges: unknown;
             excess_service_role_column_privileges: unknown;
             excess_service_role_effective_insert_columns: unknown;
+            missing_knowledge_reader_role: unknown;
+            invalid_knowledge_reader_privileges: unknown;
+            missing_knowledge_reader_policies: unknown;
             unexpected_message_insert_policies: unknown;
             embedding_dimensioned: boolean;
             dimension_dependent_indexes: unknown;
@@ -324,7 +328,55 @@ describe("Supabase database foundation", () => {
                 ('public.health_source_reviews', 'DELETE'),
                 ('public.health_source_reviews', 'TRUNCATE'),
                 ('public.health_sources', 'TRUNCATE'),
-                ('public.health_source_chunks', 'TRUNCATE')
+                ('public.health_source_chunks', 'TRUNCATE'),
+                ('public.health_sources', 'SELECT'),
+                ('public.health_sources', 'INSERT'),
+                ('public.health_sources', 'UPDATE'),
+                ('public.health_sources', 'DELETE'),
+                ('public.health_source_reviews', 'SELECT'),
+                ('public.health_source_reviews', 'INSERT'),
+                ('public.health_source_chunks', 'SELECT'),
+                ('public.health_source_chunks', 'INSERT'),
+                ('public.health_source_chunks', 'UPDATE'),
+                ('public.health_source_chunks', 'DELETE'),
+                ('public.approved_health_sources', 'SELECT'),
+                ('public.approved_source_chunks', 'SELECT')
+            ),
+            expected_knowledge_reader_privileges(
+              relation_name,
+              privilege_name,
+              should_have
+            ) AS (
+              VALUES
+                ('public.health_sources', 'SELECT', TRUE),
+                ('public.health_source_reviews', 'SELECT', TRUE),
+                ('public.health_source_chunks', 'SELECT', TRUE),
+                ('public.health_source_chunks', 'INSERT', TRUE),
+                ('public.health_source_chunks', 'UPDATE', TRUE),
+                ('public.approved_health_sources', 'SELECT', TRUE),
+                ('public.approved_source_chunks', 'SELECT', TRUE),
+                ('public.health_sources', 'INSERT', FALSE),
+                ('public.health_sources', 'UPDATE', FALSE),
+                ('public.health_sources', 'DELETE', FALSE),
+                ('public.health_source_reviews', 'INSERT', FALSE),
+                ('public.health_source_reviews', 'UPDATE', FALSE),
+                ('public.health_source_reviews', 'DELETE', FALSE),
+                ('public.health_source_chunks', 'DELETE', FALSE),
+                ('public.user_profiles', 'SELECT', FALSE),
+                ('public.conversations', 'SELECT', FALSE),
+                ('public.messages', 'SELECT', FALSE)
+            ),
+            expected_knowledge_reader_policies(
+              table_name,
+              policy_name,
+              policy_command
+            ) AS (
+              VALUES
+                ('health_sources', 'knowledge_reader_select_approved_sources', 'SELECT'),
+                ('health_source_reviews', 'knowledge_reader_select_current_reviews', 'SELECT'),
+                ('health_source_chunks', 'knowledge_reader_select_approved_chunks', 'SELECT'),
+                ('health_source_chunks', 'knowledge_reader_insert_approved_chunks', 'INSERT'),
+                ('health_source_chunks', 'knowledge_reader_update_approved_chunks', 'UPDATE')
             )
             SELECT
               to_json(ARRAY(
@@ -550,6 +602,65 @@ describe("Supabase database foundation", () => {
                          restricted.privilege_name
               )) AS service_role_privileges,
               to_json(ARRAY(
+                SELECT 'service_role has USAGE or SELECT on the source review sequence'
+                WHERE has_sequence_privilege(
+                  'service_role',
+                  'public.health_source_reviews_review_id_seq',
+                  'USAGE'
+                )
+                OR has_sequence_privilege(
+                  'service_role',
+                  'public.health_source_reviews_review_id_seq',
+                  'SELECT'
+                )
+              )) AS excess_service_role_sequence_privileges,
+              to_json(ARRAY(
+                SELECT 'mediaguide_knowledge_reader is missing or privileged'
+                WHERE NOT EXISTS (
+                  SELECT 1
+                  FROM pg_roles AS knowledge_role
+                  WHERE knowledge_role.rolname =
+                        'mediaguide_knowledge_reader'
+                    AND NOT knowledge_role.rolcanlogin
+                    AND NOT knowledge_role.rolsuper
+                    AND NOT knowledge_role.rolcreatedb
+                    AND NOT knowledge_role.rolcreaterole
+                    AND NOT knowledge_role.rolreplication
+                    AND NOT knowledge_role.rolbypassrls
+                )
+              )) AS missing_knowledge_reader_role,
+              to_json(ARRAY(
+                SELECT format(
+                  'knowledge reader has unexpected %s on %s (expected %s)',
+                  expected.privilege_name,
+                  expected.relation_name,
+                  expected.should_have
+                )
+                FROM expected_knowledge_reader_privileges AS expected
+                WHERE has_table_privilege(
+                  'mediaguide_knowledge_reader',
+                  to_regclass(expected.relation_name),
+                  expected.privilege_name
+                ) <> expected.should_have
+                ORDER BY expected.relation_name, expected.privilege_name
+              )) AS invalid_knowledge_reader_privileges,
+              to_json(ARRAY(
+                SELECT expected.policy_name
+                FROM expected_knowledge_reader_policies AS expected
+                WHERE NOT EXISTS (
+                  SELECT 1
+                  FROM pg_policies AS policy
+                  WHERE policy.schemaname = 'public'
+                    AND policy.tablename = expected.table_name
+                    AND policy.policyname = expected.policy_name
+                    AND policy.cmd = expected.policy_command
+                    AND policy.roles @> ARRAY[
+                      'mediaguide_knowledge_reader'
+                    ]::name[]
+                )
+                ORDER BY expected.table_name, expected.policy_name
+              )) AS missing_knowledge_reader_policies,
+              to_json(ARRAY(
                 SELECT format(
                   'service_role lacks INSERT on public.messages.%s',
                   expected.column_name
@@ -673,6 +784,22 @@ describe("Supabase database foundation", () => {
             row.service_role_privileges,
             "service_role_privileges",
           ),
+          excess_service_role_sequence_privileges: normalizeStringArray(
+            row.excess_service_role_sequence_privileges,
+            "excess_service_role_sequence_privileges",
+          ),
+          missing_knowledge_reader_role: normalizeStringArray(
+            row.missing_knowledge_reader_role,
+            "missing_knowledge_reader_role",
+          ),
+          invalid_knowledge_reader_privileges: normalizeStringArray(
+            row.invalid_knowledge_reader_privileges,
+            "invalid_knowledge_reader_privileges",
+          ),
+          missing_knowledge_reader_policies: normalizeStringArray(
+            row.missing_knowledge_reader_policies,
+            "missing_knowledge_reader_policies",
+          ),
           missing_service_role_privileges: normalizeStringArray(
             row.missing_service_role_privileges,
             "missing_service_role_privileges",
@@ -742,6 +869,26 @@ describe("Supabase database foundation", () => {
           ...(checks.service_role_privileges.length > 0
             ? [
                 `excess service-role privileges: ${checks.service_role_privileges.join(", ")}`,
+              ]
+            : []),
+          ...(checks.excess_service_role_sequence_privileges.length > 0
+            ? [
+                `excess service-role sequence privileges: ${checks.excess_service_role_sequence_privileges.join(", ")}`,
+              ]
+            : []),
+          ...(checks.missing_knowledge_reader_role.length > 0
+            ? [
+                `knowledge-reader role is missing or unsafe: ${checks.missing_knowledge_reader_role.join(", ")}`,
+              ]
+            : []),
+          ...(checks.invalid_knowledge_reader_privileges.length > 0
+            ? [
+                `knowledge-reader privileges are incorrect: ${checks.invalid_knowledge_reader_privileges.join(", ")}`,
+              ]
+            : []),
+          ...(checks.missing_knowledge_reader_policies.length > 0
+            ? [
+                `knowledge-reader RLS policies are missing: ${checks.missing_knowledge_reader_policies.join(", ")}`,
               ]
             : []),
           ...(checks.embedding_dimensioned

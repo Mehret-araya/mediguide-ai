@@ -92,6 +92,29 @@ class VectorStore(Protocol):
     ) -> list["RetrievedPassage"]: ...
 
 
+def normalize_embedding(
+    embedding: Sequence[float],
+    *,
+    expected_dimensions: int | None = None,
+) -> tuple[float, ...]:
+    if not embedding or (
+        expected_dimensions is not None
+        and len(embedding) != expected_dimensions
+    ):
+        raise ValueError("Embedding dimensions are invalid.")
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        for value in embedding
+    ):
+        raise ValueError("Embeddings must contain only finite numbers.")
+    normalized = tuple(float(value) for value in embedding)
+    if not any(normalized):
+        raise ValueError("Embeddings cannot be zero vectors.")
+    return normalized
+
+
 @dataclass(frozen=True)
 class RetrievedPassage:
     chunk: DocumentChunk
@@ -186,14 +209,25 @@ class InMemoryVectorStore:
         if len(chunks) != len(embeddings):
             raise ValueError("Every chunk must have exactly one embedding.")
 
-        for chunk, vector in zip(chunks, embeddings, strict=True):
+        normalized_vectors = [
+            normalize_embedding(vector) for vector in embeddings
+        ]
+        dimensions = len(normalized_vectors[0]) if normalized_vectors else None
+        if self._dimensions is not None and dimensions is not None:
+            normalize_embedding(
+                normalized_vectors[0],
+                expected_dimensions=self._dimensions,
+            )
+        if dimensions is not None and any(
+            len(vector) != dimensions for vector in normalized_vectors
+        ):
+            raise ValueError("Embedding dimensions do not match.")
+
+        for chunk in chunks:
             validate_approved_chunk(chunk)
-            values = tuple(float(value) for value in vector)
-            if not values or any(not math.isfinite(value) for value in values):
-                raise ValueError("Embeddings must be finite non-empty vectors.")
-            if self._dimensions is not None and len(values) != self._dimensions:
-                raise ValueError("Embedding dimensions do not match the index.")
-            self._dimensions = len(values)
+        if dimensions is not None:
+            self._dimensions = dimensions
+        for chunk, values in zip(chunks, normalized_vectors, strict=True):
             self._vectors[chunk.chunk_id] = (chunk, values)
 
     async def search(
@@ -202,11 +236,10 @@ class InMemoryVectorStore:
         *,
         limit: int,
     ) -> list[RetrievedPassage]:
-        query = tuple(float(value) for value in embedding)
-        if not query or any(not math.isfinite(value) for value in query):
-            raise ValueError("Query embedding must be a finite non-empty vector.")
-        if self._dimensions is not None and len(query) != self._dimensions:
-            raise ValueError("Query embedding dimension does not match the index.")
+        query = normalize_embedding(
+            embedding,
+            expected_dimensions=self._dimensions,
+        )
         if limit <= 0:
             return []
 
@@ -248,6 +281,11 @@ class VectorRetriever:
         )
         if len(embeddings) != len(chunks):
             raise ValueError("Embedding provider returned an invalid result count.")
+        if not embeddings:
+            return
+        dimensions = len(embeddings[0])
+        for embedding in embeddings:
+            normalize_embedding(embedding, expected_dimensions=dimensions)
         await self._vector_store.upsert(chunks, embeddings)
 
     async def retrieve(
@@ -256,7 +294,10 @@ class VectorRetriever:
         *,
         limit: int = 3,
     ) -> list[RetrievedPassage]:
+        if limit <= 0:
+            return []
         embeddings = await self._embedding_provider.embed_texts([question])
         if len(embeddings) != 1:
             raise ValueError("Embedding provider returned an invalid query result.")
+        normalize_embedding(embeddings[0])
         return await self._vector_store.search(embeddings[0], limit=limit)

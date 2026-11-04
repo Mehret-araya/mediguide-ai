@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from app.rag.chunking import DocumentChunk, SourceCitation
+from app.rag.assistant import HealthAssistant
 from app.rag.registry import (
     HealthSourceRecord,
     ReviewAuditEvent,
@@ -11,6 +12,7 @@ from app.rag.registry import (
 from app.rag.retrieval import (
     InMemoryVectorStore,
     LexicalRetriever,
+    RetrievedPassage,
     VectorRetriever,
 )
 
@@ -115,6 +117,39 @@ async def test_vector_retriever_rejects_invalid_embedding_result_count() -> None
 
 
 @pytest.mark.anyio
+async def test_vector_retriever_rejects_non_finite_embedding_values() -> None:
+    class InvalidEmbeddingProvider:
+        async def embed_texts(self, _texts: list[str]) -> list[list[float]]:
+            return [[float("nan"), 1.0]]
+
+    retriever = VectorRetriever(InvalidEmbeddingProvider(), InMemoryVectorStore())
+    with pytest.raises(ValueError, match="finite numbers"):
+        await retriever.index([chunk("one", "Test.")])
+
+
+@pytest.mark.anyio
+async def test_vector_retriever_rejects_boolean_embedding_values() -> None:
+    class InvalidEmbeddingProvider:
+        async def embed_texts(self, _texts: list[str]) -> list[list[float]]:
+            return [[True, 1.0]]
+
+    retriever = VectorRetriever(InvalidEmbeddingProvider(), InMemoryVectorStore())
+    with pytest.raises(ValueError, match="finite numbers"):
+        await retriever.index([chunk("one", "Test.")])
+
+
+@pytest.mark.anyio
+async def test_vector_retriever_rejects_zero_embedding_vectors() -> None:
+    class InvalidEmbeddingProvider:
+        async def embed_texts(self, _texts: list[str]) -> list[list[float]]:
+            return [[0.0, 0.0]]
+
+    retriever = VectorRetriever(InvalidEmbeddingProvider(), InMemoryVectorStore())
+    with pytest.raises(ValueError, match="zero vectors"):
+        await retriever.index([chunk("one", "Test.")])
+
+
+@pytest.mark.anyio
 async def test_retrievers_reject_chunks_without_current_approval_evidence() -> None:
     approved_fixture = chunk("pending", "Test passage.")
     pending = replace(
@@ -126,3 +161,77 @@ async def test_retrievers_reject_chunks_without_current_approval_evidence() -> N
 
     with pytest.raises(ValueError, match="not approved"):
         LexicalRetriever([pending])
+
+
+@pytest.mark.anyio
+async def test_assistant_abstains_on_matching_claims_with_opposite_polarity() -> None:
+    passages = [
+        chunk("positive", "Malaria is caused by parasites."),
+        chunk("negative", "Malaria is not caused by parasites."),
+    ]
+
+    class ConflictingRetriever:
+        async def retrieve(
+            self, _question: str, *, limit: int = 3
+        ) -> list[RetrievedPassage]:
+            return [RetrievedPassage(chunk, 1.0) for chunk in passages[:limit]]
+
+    response = await HealthAssistant(ConflictingRetriever()).answer(
+        "What causes malaria?",
+        request_id="test-request",
+    )
+
+    assert response.citations == []
+    assert "consistent information" in response.answer
+
+
+@pytest.mark.anyio
+async def test_assistant_detects_conflicting_statements_in_same_section() -> None:
+    positive = chunk("same-source-positive", "Malaria is caused by parasites.")
+    negative = chunk("same-source-negative", "Malaria is not caused by parasites.")
+    negative = replace(
+        negative,
+        citation=positive.citation,
+        source_metadata=positive.source_metadata,
+        approval_event=positive.approval_event,
+    )
+    passages = [positive, negative]
+
+    class ConflictingRetriever:
+        async def retrieve(
+            self, _question: str, *, limit: int = 3
+        ) -> list[RetrievedPassage]:
+            return [RetrievedPassage(chunk, 1.0) for chunk in passages[:limit]]
+
+    response = await HealthAssistant(ConflictingRetriever()).answer(
+        "What causes malaria?",
+        request_id="test-request",
+    )
+
+    assert response.citations == []
+    assert "consistent information" in response.answer
+
+
+@pytest.mark.anyio
+async def test_assistant_excludes_sources_explicitly_marked_outdated() -> None:
+    old = chunk("old", "Malaria is caused by parasites.")
+    outdated = replace(
+        old,
+        source_metadata=old.source_metadata.model_copy(
+            update={"limitations": ["This source is outdated and superseded."]}
+        ),
+    )
+
+    class OutdatedRetriever:
+        async def retrieve(
+            self, _question: str, *, limit: int = 3
+        ) -> list[RetrievedPassage]:
+            return [RetrievedPassage(outdated, 1.0)][:limit]
+
+    response = await HealthAssistant(OutdatedRetriever()).answer(
+        "What causes malaria?",
+        request_id="test-request",
+    )
+
+    assert response.citations == []
+    assert "consistent information" in response.answer
