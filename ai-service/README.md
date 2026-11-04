@@ -83,9 +83,23 @@ When configured, manifest documents are sent to the embedding endpoint at
 startup for indexing, and each user question is sent to that endpoint for
 query embedding. Perform a privacy and vendor review first; do not send health
 questions or source documents to a third party without approval. Use HTTPS
-outside loopback and a restricted database login with access only to the
-knowledge-base tables/views. Hosted database connections use certificate
-verification; loopback connections may use plaintext for local development.
+outside loopback and a dedicated login that is a member only of the
+`mediaguide_knowledge_reader` role. Migration
+`20261104010000_knowledge_reader_role.sql` creates a `NOLOGIN`,
+`NOBYPASSRLS` group role with read access scoped to currently approved sources,
+and chunk insert/update access scoped to approved sources. It cannot alter
+source records or review decisions, delete chunks, or read account/conversation
+tables. The migration adds narrowly scoped role-specific RLS policies and does
+not replace the existing policies.
+`20261104020000_restrict_service_role_knowledge_access.sql` removes the
+previously granted unused knowledge-table permissions from Supabase
+`service_role`; it does not change its separately restricted message-insert
+permission. Create a separate login and grant it only the reader role; never
+use `postgres`, `service_role`, or a frontend credential for
+`KNOWLEDGE_DATABASE_URL`. Verify the login has no other privileged memberships
+and keep its password in the server secret manager. Hosted database connections
+use certificate verification; loopback connections may use plaintext for
+local development.
 No provider, database, or source corpus is configured by default.
 The current pgvector query uses exact distance ordering and is not benchmarked
 or equipped with a dimension-specific approximate-nearest-neighbor index; do
@@ -212,6 +226,18 @@ Run tests with:
 python -m pytest
 python -m mypy app
 ```
+
+The database-role security integration is opt-in and loopback-only. After
+applying local migrations, set `RUN_LOCAL_RAG_SECURITY_INTEGRATION=true` and
+`RAG_TEST_DATABASE_URL` to the local Supabase database URL, then run:
+
+```powershell
+python -m pytest tests/test_rag_postgres_store.py
+```
+
+The test creates a temporary login and synthetic source rows, checks approved-
+source isolation and denied privileges, and removes its fixtures and login.
+Never set its URL to a hosted or production database.
 
 Never put passwords, API keys, tokens, or other credentials in `.env.example`.
 Local `.env` files are ignored by Git; do not force-add or commit them. Configure
