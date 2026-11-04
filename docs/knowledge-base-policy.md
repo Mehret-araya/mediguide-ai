@@ -1,4 +1,3 @@
-
 # MediGuide AI — Knowledge Base and Citation Policy
 
 ## 1. Purpose
@@ -32,20 +31,25 @@ The appearance of a source on this list does not mean its individual documents h
   non-commercial use, but third-party credited content may have separate
   rights, document-specific notices govern, and commercial use requires
   permission.
-- A specific review candidate is WHO's [Malaria fact sheet](https://www.who.int/news-room/fact-sheets/detail/malaria)
-  (publisher: World Health Organization). Its individual publication/update
-  date and any credited third-party material still require document-level
-  verification; it is not approved or ingested.
+- Specific review candidates from WHO include:
+  - [Malaria fact sheet](https://www.who.int/news-room/fact-sheets/detail/malaria)
+    (publisher: World Health Organization; updated: 2025-12-04; license:
+    CC BY-NC-SA 3.0 IGO). Third-party photographs and logos are excluded.
+  - [Diarrhoeal disease fact sheet](https://www.who.int/news-room/fact-sheets/detail/diarrhoeal-disease)
+    (publisher: World Health Organization; updated: 2024-03-07; license:
+    CC BY-NC-SA 3.0 IGO). Third-party photographs and logos are excluded.
 - Ethiopia's Ministry of Health ([moh.gov.et](https://www.moh.gov.et/)) is an
-  authoritative local candidate. A reuse license or permission basis for
-  individual documents has not been verified; its materials are not eligible
-  for retrieval until that is documented.
+  authoritative local candidate. Its website explicitly reserves all rights and
+  prohibits republication or adaptation without prior written consent.
+  Consequently, its materials are not eligible for ingestion or retrieval
+  without explicit written permission.
 
-For the WHO candidate, confirm its current date, applicable reuse notice, and
-any third-party material before recording it in the source registry. If
-MediGuide is operated commercially, obtain permission before using WHO content.
-These are candidates only. No individual document license review, source
-approval, or production corpus is represented as completed.
+For the WHO candidates, document-level verification confirmed current dates,
+CC BY-NC-SA 3.0 IGO licensing terms, and media exclusion requirements. If
+MediGuide is operated commercially, permission must be obtained before using
+WHO content. These candidates remain pending formal review and approval before
+retrieval activation. Detail is recorded in
+[`docs/candidate-sources-evaluation.md`](./candidate-sources-evaluation.md).
 
 ## 3. Source Approval Process
 
