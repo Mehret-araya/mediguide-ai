@@ -37,6 +37,50 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("health education backend-to-AI integration", () => {
+  it("rejects zero, negative, and non-finite timeout values at construction", () => {
+    expect(() => new HealthEducationClient({ timeoutMs: 0 })).toThrow(RangeError);
+    expect(() => new HealthEducationClient({ timeoutMs: -1 })).toThrow(RangeError);
+    expect(() => new HealthEducationClient({ timeoutMs: Infinity })).toThrow(RangeError);
+    expect(() => new HealthEducationClient({ timeoutMs: NaN })).toThrow(RangeError);
+  });
+
+  it("accepts a positive finite timeout without throwing", () => {
+    expect(() => new HealthEducationClient({ timeoutMs: 1 })).not.toThrow();
+    expect(() => new HealthEducationClient({ timeoutMs: 30000 })).not.toThrow();
+  });
+
+  it("returns 400 for an empty question", async () => {
+    const client = new HealthEducationClient({
+      serviceUrl: "https://ai.internal.example",
+      serviceToken: "test-internal-token",
+      fetchImplementation: vi.fn(),
+    });
+
+    const response = await request(createApp(client))
+      .post("/api/v1/health-education")
+      .send({ question: "   " });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 400 for a question over 2000 characters", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const client = new HealthEducationClient({
+      serviceUrl: "https://ai.internal.example",
+      serviceToken: "test-internal-token",
+      fetchImplementation,
+    });
+
+    const response = await request(createApp(client))
+      .post("/api/v1/health-education")
+      .send({ question: "q".repeat(2001) });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("VALIDATION_ERROR");
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
   it("validates and normalizes incoming requests against the AI contract", () => {
     expect(parseHealthEducationRequest({ question: "  What is malaria? " }))
       .toEqual({ question: "What is malaria?", language: "en" });
