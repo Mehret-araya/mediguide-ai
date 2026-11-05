@@ -369,6 +369,54 @@ describe("authenticated conversation routes", () => {
     expect(messageRequests(fetcher)).toHaveLength(0);
   });
 
+  it("rejects a question over 2000 characters", async () => {
+    const { app, answer } = createTestApp();
+
+    const response = await request(app)
+      .post(`/api/v1/conversations/${conversation.id}/messages`)
+      .set("Idempotency-Key", idempotencyKey)
+      .send({ question: "q".repeat(2001) });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("VALIDATION_ERROR");
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it("accepts a question of exactly 2000 characters", async () => {
+    const { app } = createTestApp();
+
+    const response = await request(app)
+      .post(`/api/v1/conversations/${conversation.id}/messages`)
+      .set("Idempotency-Key", idempotencyKey)
+      .send({ question: "q".repeat(2000) });
+
+    expect(response.status).toBe(200);
+  });
+
+  it("rejects a non-English language value", async () => {
+    const { app, answer } = createTestApp();
+
+    const response = await request(app)
+      .post(`/api/v1/conversations/${conversation.id}/messages`)
+      .set("Idempotency-Key", idempotencyKey)
+      .send({ question: "What is malaria?", language: "am" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("VALIDATION_ERROR");
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for DELETE with a malformed conversation ID", async () => {
+    const { app } = createTestApp();
+
+    const response = await request(app).delete(
+      "/api/v1/conversations/not-a-uuid",
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("VALIDATION_ERROR");
+  });
+
   it("rejects malformed conversation IDs and idempotency keys", async () => {
     const { app, answer, fetcher } = createTestApp();
 

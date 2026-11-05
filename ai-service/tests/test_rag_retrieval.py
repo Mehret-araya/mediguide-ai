@@ -164,6 +164,64 @@ async def test_retrievers_reject_chunks_without_current_approval_evidence() -> N
 
 
 @pytest.mark.anyio
+async def test_assistant_refuses_urgent_emergency_phrases_without_citations() -> None:
+    class EmptyRetriever:
+        async def retrieve(
+            self, _question: str, *, limit: int = 3
+        ) -> list[RetrievedPassage]:
+            return []
+
+    assistant = HealthAssistant(EmptyRetriever())
+    emergency_questions = [
+        "I'm having a heart attack right now",
+        "Someone is not breathing, call an ambulance",
+        "I need emergency help",
+    ]
+    for question in emergency_questions:
+        response = await assistant.answer(question, request_id="test-request")
+        assert response.citations == [], f"Expected no citations for: {question}"
+        assert "emergency" in response.answer.lower() or "emergency number" in response.answer.lower(), (
+            f"Expected emergency guidance for: {question}"
+        )
+        assert any(
+            "emergency" in lim.lower() for lim in response.limitations
+        ), f"Expected emergency limitation for: {question}"
+
+
+@pytest.mark.anyio
+async def test_assistant_skips_corrupted_chunks_and_abstains() -> None:
+    good = chunk("good", "Malaria is caused by parasites.")
+    from dataclasses import replace as dc_replace
+    from app.rag.chunking import SourceCitation
+
+    bad = dc_replace(
+        good,
+        chunk_id="bad",
+        citation=SourceCitation(
+            source_id="wrong-source-id",
+            title=good.citation.title,
+            publisher=good.citation.publisher,
+            url=good.citation.url,
+            section=good.citation.section,
+        ),
+    )
+
+    class CorruptedRetriever:
+        async def retrieve(
+            self, _question: str, *, limit: int = 3
+        ) -> list[RetrievedPassage]:
+            return [RetrievedPassage(bad, 1.0)]
+
+    response = await HealthAssistant(CorruptedRetriever()).answer(
+        "What causes malaria?",
+        request_id="test-request",
+    )
+
+    assert response.citations == []
+    assert "couldn't find" in response.answer or "consistent information" in response.answer
+
+
+@pytest.mark.anyio
 async def test_assistant_abstains_on_matching_claims_with_opposite_polarity() -> None:
     passages = [
         chunk("positive", "Malaria is caused by parasites."),

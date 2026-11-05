@@ -130,6 +130,35 @@ describe("verified facility directory API", () => {
     expect(response.body.code).toBe("FACILITY_DATA_INVALID");
   });
 
+  it("rejects an offset above 10000", async () => {
+    const provider: FacilityDirectoryProvider = {
+      search: vi.fn(),
+    };
+
+    const response = await request(createTestApp(provider)).get(
+      "/api/v1/facilities?offset=10001",
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("VALIDATION_ERROR");
+    expect(provider.search).not.toHaveBeenCalled();
+  });
+
+  it("accepts an offset of exactly 10000", async () => {
+    const provider: FacilityDirectoryProvider = {
+      search: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    };
+
+    const response = await request(createTestApp(provider)).get(
+      "/api/v1/facilities?offset=10000",
+    );
+
+    expect(response.status).toBe(200);
+    expect(provider.search).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 10000 }),
+    );
+  });
+
   it("accepts only documented facility categories", () => {
     expect(
       isValidFacility({

@@ -22,6 +22,7 @@ This architecture is a development plan, not evidence that the components have b
 - Python
 - FastAPI
 - Retrieval-augmented generation (RAG)
+- asyncpg (PostgreSQL async driver for optional pgvector retrieval)
 
 ### Database
 - PostgreSQL
@@ -157,7 +158,9 @@ project behavior. PostgreSQL TLS verification is enabled by default for
 remote databases, with a CA path supported through `DATABASE_SSL_CA`.
 
 The AI service uses approved-manifest-gated local text ingestion, BM25-style
-lexical retrieval, and extractive answers. It has no production source corpus,
+lexical retrieval, and extractive answers. It uses asyncpg as its async
+PostgreSQL driver for the optional pgvector retrieval adapter. It has no
+production source corpus,
 LLM, embedding provider, persistent pgvector retrieval adapter, or
 clinically-reviewed deterministic emergency logic. The facility provider
 interface fails closed because no verified dataset is configured. API
