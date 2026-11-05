@@ -314,7 +314,8 @@ Purpose: Ask a general health-education question in an owned conversation.
 Request: `{ "question": "...", "language": "en" }` with an
 `Idempotency-Key` header containing a UUID. The question is trimmed and limited
 to 2,000 characters; only English is accepted by the current AI-service
-contract. Clients must reuse the same idempotency key when retrying the same
+contract. The request body must not exceed 10 KB; requests over this limit
+return `413 Content Too Large`. Clients must reuse the same idempotency key when retrying the same
 submission. Reusing the key with a different question returns `409`.
 
 The backend verifies conversation ownership through the authenticated user's
