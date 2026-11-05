@@ -40,7 +40,22 @@ Use the placeholder files as variable references:
 - `frontend/.env.example`: optional `VITE_API_URL`. Never place private
   credentials here.
 - `ai-service/.env.example`: app settings, optional
-  `KNOWLEDGE_BASE_MANIFEST`, and `AI_SERVICE_TOKEN`.
+  `KNOWLEDGE_BASE_MANIFEST`, `AI_SERVICE_TOKEN`, optional
+  `KNOWLEDGE_DATABASE_URL` (asyncpg DSN for the `mediaguide_knowledge_reader`
+  login role), and optional `KNOWLEDGE_DATABASE_SSL_CA` (path to a trusted CA
+  certificate file for the knowledge database). HTTP loopback addresses
+  (`localhost`, `127.0.0.1`, `[::1]`) skip TLS for local development only;
+  all other hosts require a verified TLS connection. Do not disable TLS
+  verification for a hosted database.
+
+  `KNOWLEDGE_DATABASE_URL` must use the `mediaguide_knowledge_reader` role
+  (a dedicated `NOLOGIN`-base, `NOBYPASSRLS` role with scoped read-only
+  access to knowledge tables). Configure a separate server-only login as a
+  member of that role. Do not use the Supabase `service_role` or any
+  frontend credential for this connection. Apply the
+  `20261104010000_knowledge_reader_role.sql` and
+  `20261104020000_restrict_service_role_knowledge_access.sql` migrations
+  before enabling persistent retrieval.
 
 For production, set secrets through the platform's secret manager, not a
 committed `.env` file. Use a unique random internal service token and rotate
