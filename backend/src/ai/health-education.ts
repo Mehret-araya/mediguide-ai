@@ -166,7 +166,13 @@ export class HealthEducationClient {
         )
       : null;
     this.serviceToken = options.serviceToken ?? process.env.AI_SERVICE_TOKEN;
-    this.timeoutMs = options.timeoutMs ?? 8000;
+    const rawTimeout = options.timeoutMs ?? 8000;
+    if (!Number.isFinite(rawTimeout) || rawTimeout <= 0) {
+      throw new RangeError(
+        `HealthEducationClient timeoutMs must be a positive finite number, got ${rawTimeout}.`,
+      );
+    }
+    this.timeoutMs = rawTimeout;
     this.fetchImplementation = options.fetchImplementation ?? fetch;
   }
 
