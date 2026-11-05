@@ -55,3 +55,4 @@ Under the terms of CC BY-NC-SA 3.0 IGO, MediGuide AI must:
 - [x] Ensure the application operates non-commercially.
 - [x] Distribute any adapted/derived educational text corpus under the same ShareAlike license.
 - [x] Include clear limitations stating that WHO does not endorse the application or its specific outputs.
+

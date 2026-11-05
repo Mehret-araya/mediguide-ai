@@ -27,3 +27,4 @@ knowledge-base/
 5. **Review Gate**:
    - Documents are held in `pending_review` status until evaluated by a qualified reviewer.
    - Only documents with verified `approved` status and an unbroken audit event are indexed for user retrieval.
+
