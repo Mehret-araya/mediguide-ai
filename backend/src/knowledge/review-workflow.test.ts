@@ -159,6 +159,39 @@ describe("Source review workflow", () => {
     expect(result.auditHistory[1].toStatus).toBe("pending_review");
   });
 
+  it("allows a needs_update source to return to pending_review", () => {
+    const needsUpdateSource: HealthSourceRecord = {
+      ...pendingSource,
+      reviewStatus: "needs_update",
+      reviewer: decision.reviewer,
+      reviewedAt: decision.reviewedAt,
+    };
+    const priorEvent: ReviewAuditEvent = {
+      sourceId: needsUpdateSource.id,
+      fromStatus: "approved",
+      toStatus: "needs_update",
+      reviewer: decision.reviewer,
+      reviewedAt: decision.reviewedAt,
+      reason: "Source content requires revision.",
+    };
+
+    const result = transitionSourceReviewStatus(
+      needsUpdateSource,
+      "pending_review",
+      decision,
+      [priorEvent],
+    );
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) return;
+
+    expect(result.record.reviewStatus).toBe("pending_review");
+    expect(result.auditEvent.fromStatus).toBe("needs_update");
+    expect(result.auditEvent.toStatus).toBe("pending_review");
+    expect(result.auditHistory).toHaveLength(2);
+  });
+
   it("does not allow a retired source to change status", () => {
     const retiredSource: HealthSourceRecord = {
       ...pendingSource,
