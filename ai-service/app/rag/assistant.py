@@ -34,6 +34,18 @@ _PERSONAL_CLINICAL_REQUEST = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_URGENT_EMERGENCY_REQUEST = re.compile(
+    r"\b("
+    r"(?:i(?:'m|\s+am)|someone(?:\s+is)?)\s+(?:having|experiencing)\s+(?:a\s+)?(?:heart\s+attack|stroke|seizure|anaphylaxis|anaphylactic|overdose|emergency)|"
+    r"(?:chest\s+pain|difficulty\s+breathing|can(?:'t|not)\s+breathe|shortness\s+of\s+breath)\b.{0,60}\b(?:right\s+now|help|emergency|urgent|severe|sudden)|"
+    r"(?:right\s+now|help|emergency|urgent|severe|sudden)\b.{0,60}\b(?:chest\s+pain|difficulty\s+breathing|can(?:'t|not)\s+breathe|shortness\s+of\s+breath)|"
+    r"call\s+(?:an?\s+)?ambulance|"
+    r"(?:i(?:'m|\s+am)|someone(?:\s+is)?)\s+(?:dying|unconscious|not\s+breathing|bleeding\s+(?:heavily|severely|uncontrollably))|"
+    r"what\s+(?:do\s+i\s+do|should\s+i\s+do)\s+(?:in\s+an?\s+)?emergency|"
+    r"emergency\s+(?:help|assistance|treatment|care)\b"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _GENERAL_LIMITATIONS = [
     "This is general health information, not a diagnosis or personalized treatment advice.",
@@ -51,6 +63,23 @@ class HealthAssistant:
         *,
         request_id: str,
     ) -> HealthEducationResponse:
+        if _URGENT_EMERGENCY_REQUEST.search(question):
+            return HealthEducationResponse(
+                answer=(
+                    "This service cannot respond to emergencies. "
+                    "If you or someone else is in immediate danger, "
+                    "call your local emergency number (such as 911 or 112) "
+                    "or go to the nearest emergency department immediately."
+                ),
+                language="en",
+                citations=[],
+                limitations=[
+                    "This service provides general health education only and cannot respond to emergencies.",
+                    "Emergency guidance has not been clinically reviewed and must not be relied upon in a crisis.",
+                ],
+                requestId=request_id,
+            )
+
         if _PERSONAL_CLINICAL_REQUEST.search(question):
             return HealthEducationResponse(
                 answer=(
@@ -73,7 +102,10 @@ class HealthAssistant:
         source_limitations: list[str] = []
 
         for passage in passages:
-            validate_approved_chunk(passage.chunk)
+            try:
+                validate_approved_chunk(passage.chunk)
+            except (ValueError, Exception):
+                continue
             if any(
                 _OUTDATED_LIMITATION.search(limitation)
                 for limitation in passage.chunk.source_metadata.limitations
