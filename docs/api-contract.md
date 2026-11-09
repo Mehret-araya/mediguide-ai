@@ -494,7 +494,12 @@ Before implementing the planned endpoints, define and enforce:
 
 All limits must be enforced by the server rather than relying only on client-side validation.
 
-The current backend applies a JSON request-body size limit of `10kb`. This does not mean that every validation, authentication, or usage-limit requirement in this section has been implemented.
+The current backend applies a JSON request-body size limit of `10kb` and
+per-IP rate limits on all sensitive endpoints (credential endpoints: 10 req /
+15 min; session endpoints: 30 req / 15 min; health-education: 20 req / min;
+conversation writes: 30 req / min; facility search: 60 req / min). Rate
+limiting uses an in-memory store per process; a multi-instance deployment
+requires a shared store. All limits are enforced server-side.
 
 ## 11. Backend-to-AI-Service Boundary
 
@@ -553,8 +558,9 @@ failure behavior; local database integration covers schema and account
 deletion cascades. The facility endpoint has no configured provider or
 verified records. The AI corpus is empty by default and abstains.
 
-Still incomplete or unverified: hosted Supabase integration, production
-rate-limiting, consistent error envelopes across every endpoint, verified
+Still incomplete or unverified: hosted Supabase integration,
+consistent error envelopes across every endpoint, verified
 facility data, production health sources, clinical emergency safeguards,
-backup restoration, monitoring, and deployment. Documentation does not
+backup restoration, monitoring, and deployment. Rate limiting is implemented
+and tested locally (in-memory, single-instance). Documentation does not
 supersede testing or clinical review.
