@@ -123,7 +123,9 @@ covered by mocked tests. The hosted project has not been tested.
 
 The frontend sends credentialed requests and does not access session tokens
 from JavaScript; production must use HTTPS and suitable same-site origins for
-`SameSite=Lax` cookies. Deployment rate limiting/abuse controls, a retention
+`SameSite=Lax` cookies. Per-IP rate limiting is implemented on all sensitive
+endpoints using an in-memory store (single-instance only; a shared store is
+required before horizontal scaling). A retention
 policy, backup protection and restoration testing, incident response, and
 production security configuration remain incomplete. No production deployment
 or independent security audit has occurred.
