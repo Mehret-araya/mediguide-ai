@@ -6,6 +6,10 @@ import {
 import {
   isAllowedBrowserOrigin as isAllowedOrigin,
 } from "../security/browser-origins.js";
+import {
+  authCredentialLimiter,
+  authSessionLimiter,
+} from "../security/rate-limit.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const ACCESS_COOKIE = "mediguide_access";
@@ -180,7 +184,7 @@ export function createAuthRouter(
 ): Router {
   const router = Router();
 
-  router.post("/register", async (req, res, next) => {
+  router.post("/register", authCredentialLimiter, async (req, res, next) => {
     if (!validateBrowserOrigin(req, res)) {
       return;
     }
@@ -216,7 +220,7 @@ export function createAuthRouter(
     }
   });
 
-  router.post("/login", async (req, res, next) => {
+  router.post("/login", authCredentialLimiter, async (req, res, next) => {
     if (!validateBrowserOrigin(req, res)) {
       return;
     }
@@ -243,7 +247,7 @@ export function createAuthRouter(
     }
   });
 
-  router.post("/refresh", async (req, res, next) => {
+  router.post("/refresh", authSessionLimiter, async (req, res, next) => {
     if (!validateCookieMutationOrigin(req, res)) {
       return;
     }
@@ -271,7 +275,7 @@ export function createAuthRouter(
     }
   });
 
-  router.post("/logout", async (req, res, next) => {
+  router.post("/logout", authSessionLimiter, async (req, res, next) => {
     if (!validateCookieMutationOrigin(req, res)) {
       return;
     }
@@ -299,7 +303,7 @@ export function createAuthRouter(
     }
   });
 
-  router.get("/me", async (req, res, next) => {
+  router.get("/me", authSessionLimiter, async (req, res, next) => {
     const accessToken = getAccessToken(req);
 
     if (!accessToken) {
@@ -329,7 +333,7 @@ export function createAuthRouter(
     }
   });
 
-  router.delete("/account", async (req, res, next) => {
+  router.delete("/account", authSessionLimiter, async (req, res, next) => {
     if (!validateCookieMutationOrigin(req, res)) {
       return;
     }
