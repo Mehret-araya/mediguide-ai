@@ -15,6 +15,13 @@ import { createConversationsRouter } from "./routes/conversations.js";
 import educationRouter from "./routes/education.js";
 import { createFacilitiesRouter } from "./routes/facilities.js";
 import { isAllowedBrowserOrigin } from "./security/browser-origins.js";
+import {
+  authCredentialLimiter,
+  authSessionLimiter,
+  conversationWriteLimiter,
+  facilitySearchLimiter,
+  healthEducationLimiter,
+} from "./security/rate-limit.js";
 
 // Handle unexpected errors without exposing internal details.
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
@@ -90,10 +97,11 @@ export function createApp(
   app.use(express.json({ limit: "10kb" }));
 
   app.use("/api/v1/education", educationRouter);
-  app.use("/api/v1/conversations", createConversationsRouter());
-  app.use("/api/v1/facilities", createFacilitiesRouter());
+  app.use("/api/v1/conversations", conversationWriteLimiter, createConversationsRouter());
+  app.use("/api/v1/facilities", facilitySearchLimiter, createFacilitiesRouter());
   app.use(
     "/api/v1/health-education",
+    healthEducationLimiter,
     createHealthEducationRouter(healthEducationClient),
   );
   app.use("/api/v1/auth", createAuthRouter());
