@@ -34,6 +34,7 @@ vi.mock('./conversations/api', () => ({
 
 const user: AuthUser = { id: 'user-1', email: 'person@example.org' }
 const otherUser: AuthUser = { id: 'user-2', email: 'other@example.org' }
+const defaultViewportWidth = window.innerWidth
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -42,39 +43,46 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    value: defaultViewportWidth,
+  })
 })
 
 describe('site authentication navigation', () => {
-  it('restores every user and assistant message for the first conversation', async () => {
+  it.each([375, 1440])(
+    'restores all eight messages and reveals an offscreen thread at %i px',
+    async (viewportWidth) => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: viewportWidth,
+    })
     const summary = {
       id: 'conversation-history',
       created_at: '2026-10-31T12:00:00.000Z',
-      updated_at: '2026-10-31T12:00:04.000Z',
+      updated_at: '2026-10-31T12:00:08.000Z',
     }
-    const messages = [
-      {
-        id: 'user-1', role: 'user' as const, content: 'First question',
-        citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
-      },
-      {
-        id: 'assistant-1', role: 'assistant' as const, content: 'First answer',
-        citations: [], limitations: [], created_at: '2026-10-31T12:00:02.000Z',
-      },
-      {
-        id: 'user-2', role: 'user' as const, content: 'Second question',
-        citations: [], limitations: [], created_at: '2026-10-31T12:00:03.000Z',
-      },
-      {
-        id: 'assistant-2', role: 'assistant' as const, content: 'Second answer',
-        citations: [], limitations: [], created_at: '2026-10-31T12:00:04.000Z',
-      },
-    ]
+    const messages = Array.from({ length: 8 }, (_, index) => {
+      const number = Math.floor(index / 2) + 1
+      const role = index % 2 === 0 ? 'user' as const : 'assistant' as const
+      return {
+        id: `message-${index + 1}`,
+        role,
+        content: `${role === 'user' ? 'Question' : 'Answer'} ${number}`,
+        citations: [],
+        limitations: [],
+        created_at: new Date(Date.UTC(2026, 9, 31, 12, 0, index + 1)).toISOString(),
+      }
+    })
+    let resolveHistory: ((value: Awaited<ReturnType<typeof conversationsApi.get>>) => void) | undefined
+    const pendingHistory = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveHistory = resolve
+    })
     vi.mocked(authApi.me).mockResolvedValue(user)
     vi.mocked(conversationsApi.list).mockResolvedValue([summary])
-    vi.mocked(conversationsApi.get).mockResolvedValue({
-      conversation: summary,
-      messages,
-    })
+    vi.mocked(conversationsApi.get).mockReturnValueOnce(pendingHistory)
 
     render(
       <AuthProvider>
@@ -82,22 +90,42 @@ describe('site authentication navigation', () => {
       </AuthProvider>,
     )
 
-    const firstQuestion = await screen.findByText('First question')
-    expect(screen.getByText('First answer')).toBeTruthy()
-    expect(screen.getByText('Second question')).toBeTruthy()
-    expect(screen.getByText('Second answer')).toBeTruthy()
-    const renderedMessages = firstQuestion.closest('.conversation-thread')
-      ?.querySelectorAll('article')
-    expect(Array.from(renderedMessages ?? []).map((message) =>
+    await waitFor(() => expect(conversationsApi.get).toHaveBeenCalledWith(summary.id))
+    const thread = document.querySelector<HTMLDivElement>('.conversation-thread')
+    expect(thread).not.toBeNull()
+    const scrollIntoView = vi.fn()
+    thread!.getBoundingClientRect = () => ({
+      x: 0,
+      y: -3048,
+      top: -3048,
+      bottom: -2618,
+      left: 0,
+      right: viewportWidth,
+      width: viewportWidth,
+      height: 430,
+      toJSON: () => ({}),
+    })
+    thread!.scrollIntoView = scrollIntoView
+
+    await act(async () => {
+      resolveHistory?.({ conversation: summary, messages })
+      await pendingHistory
+    })
+
+    await screen.findByText('Question 1')
+    const renderedMessages = thread!.querySelectorAll('article')
+    expect(renderedMessages).toHaveLength(8)
+    expect(Array.from(renderedMessages).map((message) =>
       message.querySelector('p')?.textContent,
     )).toEqual([
-      'First question',
-      'First answer',
-      'Second question',
-      'Second answer',
+      'Question 1', 'Answer 1', 'Question 2', 'Answer 2',
+      'Question 3', 'Answer 3', 'Question 4', 'Answer 4',
     ])
+    expect(scrollIntoView).toHaveBeenCalledOnce()
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'instant', block: 'start' })
     expect(conversationsApi.get).toHaveBeenCalledWith('conversation-history')
-  })
+    },
+  )
 
   it('does not let a stale history request replace the newly selected conversation', async () => {
     const first = {
