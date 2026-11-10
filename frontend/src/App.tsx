@@ -220,7 +220,10 @@ function App() {
   const [historyOwnerId, setHistoryOwnerId] = useState<string | null>(null)
   const authenticatedUserIdRef = useRef<string | null>(null)
   const historyRequestIdRef = useRef(0)
+  const conversationThreadRef = useRef<HTMLDivElement>(null)
   const userInteractedRef = useRef(false)
+  const pendingInitialThreadRevealRef = useRef(false)
+  const initialThreadRevealHandledRef = useRef(false)
   const pendingMessageRef = useRef<{
     userId: string
     conversationId: string
@@ -304,6 +307,9 @@ function App() {
         if (history[0]) {
           const detail = await conversationsApi.get(history[0].id)
           if (!active || historyRequestIdRef.current !== historyRequestId) return
+          if (!initialThreadRevealHandledRef.current) {
+            pendingInitialThreadRevealRef.current = true
+          }
           setActiveConversationId(detail.conversation.id)
           setMessages(detail.messages)
         }
@@ -329,6 +335,32 @@ function App() {
       active = false
     }
   }, [status, user])
+
+  useLayoutEffect(() => {
+    if (!pendingInitialThreadRevealRef.current || historyLoading) return
+
+    pendingInitialThreadRevealRef.current = false
+    if (initialThreadRevealHandledRef.current) return
+    initialThreadRevealHandledRef.current = true
+
+    const activeElement = document.activeElement
+    if (
+      userInteractedRef.current ||
+      (activeElement instanceof HTMLElement &&
+        activeElement !== document.body &&
+        activeElement !== document.documentElement)
+    ) {
+      return
+    }
+
+    const thread = conversationThreadRef.current
+    if (!thread) return
+
+    const bounds = thread.getBoundingClientRect()
+    if (bounds.bottom <= 0 || bounds.top >= window.innerHeight) {
+      thread.scrollIntoView({ behavior: 'instant', block: 'start' })
+    }
+  }, [historyLoading, messages])
 
   const visibleConversations =
     status === 'authenticated' && user?.id === historyOwnerId
@@ -704,6 +736,7 @@ function App() {
               className="conversation-thread"
               aria-live="polite"
               aria-busy={assistantLoading}
+              ref={conversationThreadRef}
             >
               {historyPending && <p className="conversation-status">Loading your conversation…</p>}
               {visibleMessages.map((message) => (
