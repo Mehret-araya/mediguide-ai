@@ -219,6 +219,11 @@ function App() {
   const [historyError, setHistoryError] = useState('')
   const [historyOwnerId, setHistoryOwnerId] = useState<string | null>(null)
   const authenticatedUserIdRef = useRef<string | null>(null)
+  const historyRequestIdRef = useRef(0)
+  const conversationThreadRef = useRef<HTMLDivElement>(null)
+  const userInteractedRef = useRef(false)
+  const pendingInitialThreadRevealRef = useRef(false)
+  const initialThreadRevealHandledRef = useRef(false)
   const pendingMessageRef = useRef<{
     userId: string
     conversationId: string
@@ -240,7 +245,37 @@ function App() {
   }, [status, user?.id])
 
   useEffect(() => {
+    const markUserInteraction = () => {
+      userInteractedRef.current = true
+    }
+    const markScrollKey = (event: KeyboardEvent) => {
+      if (
+        ['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' '].includes(
+          event.key,
+        )
+      ) {
+        markUserInteraction()
+      }
+    }
+
+    window.addEventListener('wheel', markUserInteraction, { passive: true })
+    window.addEventListener('touchstart', markUserInteraction, { passive: true })
+    window.addEventListener('pointerdown', markUserInteraction)
+    window.addEventListener('keydown', markScrollKey)
+    document.addEventListener('focusin', markUserInteraction)
+
+    return () => {
+      window.removeEventListener('wheel', markUserInteraction)
+      window.removeEventListener('touchstart', markUserInteraction)
+      window.removeEventListener('pointerdown', markUserInteraction)
+      window.removeEventListener('keydown', markScrollKey)
+      document.removeEventListener('focusin', markUserInteraction)
+    }
+  }, [])
+
+  useEffect(() => {
     let active = true
+    const historyRequestId = ++historyRequestIdRef.current
 
     if (status !== 'authenticated' || !user) {
       void Promise.resolve().then(() => {
@@ -259,10 +294,11 @@ function App() {
       }
     }
 
+    setHistoryLoading(true)
     void (async () => {
       try {
         const history = await conversationsApi.list()
-        if (!active) return
+        if (!active || historyRequestIdRef.current !== historyRequestId) return
         setHistoryOwnerId(user.id)
         setHistoryError('')
         setConversations(history)
@@ -270,12 +306,15 @@ function App() {
         setMessages([])
         if (history[0]) {
           const detail = await conversationsApi.get(history[0].id)
-          if (!active) return
+          if (!active || historyRequestIdRef.current !== historyRequestId) return
+          if (!initialThreadRevealHandledRef.current) {
+            pendingInitialThreadRevealRef.current = true
+          }
           setActiveConversationId(detail.conversation.id)
           setMessages(detail.messages)
         }
       } catch (error) {
-        if (!active) return
+        if (!active || historyRequestIdRef.current !== historyRequestId) return
         setHistoryOwnerId(user.id)
         setConversations([])
         setActiveConversationId(null)
@@ -286,7 +325,9 @@ function App() {
             : 'Conversation history could not be loaded.',
         )
       } finally {
-        if (active) setHistoryLoading(false)
+        if (active && historyRequestIdRef.current === historyRequestId) {
+          setHistoryLoading(false)
+        }
       }
     })()
 
@@ -294,6 +335,32 @@ function App() {
       active = false
     }
   }, [status, user])
+
+  useLayoutEffect(() => {
+    if (!pendingInitialThreadRevealRef.current || historyLoading) return
+
+    pendingInitialThreadRevealRef.current = false
+    if (initialThreadRevealHandledRef.current) return
+    initialThreadRevealHandledRef.current = true
+
+    const activeElement = document.activeElement
+    if (
+      userInteractedRef.current ||
+      (activeElement instanceof HTMLElement &&
+        activeElement !== document.body &&
+        activeElement !== document.documentElement)
+    ) {
+      return
+    }
+
+    const thread = conversationThreadRef.current
+    if (!thread) return
+
+    const bounds = thread.getBoundingClientRect()
+    if (bounds.bottom <= 0 || bounds.top >= window.innerHeight) {
+      thread.scrollIntoView({ behavior: 'instant', block: 'start' })
+    }
+  }, [historyLoading, messages])
 
   const visibleConversations =
     status === 'authenticated' && user?.id === historyOwnerId
@@ -308,23 +375,33 @@ function App() {
   async function selectConversation(id: string) {
     const requestUserId = authenticatedUserIdRef.current
     if (!requestUserId) return
+    const historyRequestId = ++historyRequestIdRef.current
 
     setHistoryLoading(true)
     setHistoryError('')
     try {
       const detail = await conversationsApi.get(id)
-      if (authenticatedUserIdRef.current !== requestUserId) return
+      if (
+        authenticatedUserIdRef.current !== requestUserId ||
+        historyRequestIdRef.current !== historyRequestId
+      ) return
       setActiveConversationId(detail.conversation.id)
       setMessages(detail.messages)
     } catch (error) {
-      if (authenticatedUserIdRef.current !== requestUserId) return
+      if (
+        authenticatedUserIdRef.current !== requestUserId ||
+        historyRequestIdRef.current !== historyRequestId
+      ) return
       setHistoryError(
         error instanceof Error
           ? error.message
           : 'Conversation history could not be loaded.',
       )
     } finally {
-      if (authenticatedUserIdRef.current === requestUserId) {
+      if (
+        authenticatedUserIdRef.current === requestUserId &&
+        historyRequestIdRef.current === historyRequestId
+      ) {
         setHistoryLoading(false)
       }
     }
@@ -655,7 +732,12 @@ function App() {
               </div>
               {assistantNotice && <p className="inline-notice" role="status">{assistantNotice}</p>}
             </form>
-            <div className="conversation-thread" aria-live="polite" aria-busy={assistantLoading}>
+            <div
+              className="conversation-thread"
+              aria-live="polite"
+              aria-busy={assistantLoading}
+              ref={conversationThreadRef}
+            >
               {historyPending && <p className="conversation-status">Loading your conversation…</p>}
               {visibleMessages.map((message) => (
                 <article className={`conversation-message conversation-message-${message.role}`} key={message.id}>

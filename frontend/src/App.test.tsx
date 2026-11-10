@@ -34,6 +34,7 @@ vi.mock('./conversations/api', () => ({
 
 const user: AuthUser = { id: 'user-1', email: 'person@example.org' }
 const otherUser: AuthUser = { id: 'user-2', email: 'other@example.org' }
+const defaultViewportWidth = window.innerWidth
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -42,9 +43,301 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    value: defaultViewportWidth,
+  })
 })
 
 describe('site authentication navigation', () => {
+  it.each([375, 1440])(
+    'restores all eight messages and reveals an offscreen thread at %i px',
+    async (viewportWidth) => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: viewportWidth,
+    })
+    const summary = {
+      id: 'conversation-history',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:08.000Z',
+    }
+    const messages = Array.from({ length: 8 }, (_, index) => {
+      const number = Math.floor(index / 2) + 1
+      const role = index % 2 === 0 ? 'user' as const : 'assistant' as const
+      return {
+        id: `message-${index + 1}`,
+        role,
+        content: `${role === 'user' ? 'Question' : 'Answer'} ${number}`,
+        citations: [],
+        limitations: [],
+        created_at: new Date(Date.UTC(2026, 9, 31, 12, 0, index + 1)).toISOString(),
+      }
+    })
+    let resolveHistory: ((value: Awaited<ReturnType<typeof conversationsApi.get>>) => void) | undefined
+    const pendingHistory = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveHistory = resolve
+    })
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(conversationsApi.list).mockResolvedValue([summary])
+    vi.mocked(conversationsApi.get).mockReturnValueOnce(pendingHistory)
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(conversationsApi.get).toHaveBeenCalledWith(summary.id))
+    const thread = document.querySelector<HTMLDivElement>('.conversation-thread')
+    expect(thread).not.toBeNull()
+    const scrollIntoView = vi.fn()
+    thread!.getBoundingClientRect = () => ({
+      x: 0,
+      y: -3048,
+      top: -3048,
+      bottom: -2618,
+      left: 0,
+      right: viewportWidth,
+      width: viewportWidth,
+      height: 430,
+      toJSON: () => ({}),
+    })
+    thread!.scrollIntoView = scrollIntoView
+
+    await act(async () => {
+      resolveHistory?.({ conversation: summary, messages })
+      await pendingHistory
+    })
+
+    await screen.findByText('Question 1')
+    const renderedMessages = thread!.querySelectorAll('article')
+    expect(renderedMessages).toHaveLength(8)
+    expect(Array.from(renderedMessages).map((message) =>
+      message.querySelector('p')?.textContent,
+    )).toEqual([
+      'Question 1', 'Answer 1', 'Question 2', 'Answer 2',
+      'Question 3', 'Answer 3', 'Question 4', 'Answer 4',
+    ])
+    expect(scrollIntoView).toHaveBeenCalledOnce()
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'instant', block: 'start' })
+    expect(conversationsApi.get).toHaveBeenCalledWith('conversation-history')
+    },
+  )
+
+  it('does not override a user scroll made while history is loading', async () => {
+    const summary = {
+      id: 'conversation-history',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:01.000Z',
+    }
+    let resolveHistory: ((value: Awaited<ReturnType<typeof conversationsApi.get>>) => void) | undefined
+    const pendingHistory = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveHistory = resolve
+    })
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(conversationsApi.list).mockResolvedValue([summary])
+    vi.mocked(conversationsApi.get).mockReturnValueOnce(pendingHistory)
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(conversationsApi.get).toHaveBeenCalledWith(summary.id))
+    const thread = document.querySelector<HTMLDivElement>('.conversation-thread')
+    expect(thread).not.toBeNull()
+    const scrollIntoView = vi.fn()
+    thread!.getBoundingClientRect = () => ({
+      x: 0, y: -3048, top: -3048, bottom: -2618,
+      left: 0, right: 375, width: 375, height: 430,
+      toJSON: () => ({}),
+    })
+    thread!.scrollIntoView = scrollIntoView
+
+    fireEvent.wheel(window)
+    await act(async () => {
+      resolveHistory?.({
+        conversation: summary,
+        messages: [{
+          id: 'message-user', role: 'user', content: 'Question after scrolling',
+          citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
+        }],
+      })
+      await pendingHistory
+    })
+
+    expect(await screen.findByText('Question after scrolling')).toBeTruthy()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('does not move the viewport when another control has focus', async () => {
+    const summary = {
+      id: 'conversation-history',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:01.000Z',
+    }
+    let resolveHistory: ((value: Awaited<ReturnType<typeof conversationsApi.get>>) => void) | undefined
+    const pendingHistory = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveHistory = resolve
+    })
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(conversationsApi.list).mockResolvedValue([summary])
+    vi.mocked(conversationsApi.get).mockReturnValueOnce(pendingHistory)
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(conversationsApi.get).toHaveBeenCalledWith(summary.id))
+    const thread = document.querySelector<HTMLDivElement>('.conversation-thread')
+    expect(thread).not.toBeNull()
+    const scrollIntoView = vi.fn()
+    thread!.getBoundingClientRect = () => ({
+      x: 0, y: -3048, top: -3048, bottom: -2618,
+      left: 0, right: 375, width: 375, height: 430,
+      toJSON: () => ({}),
+    })
+    thread!.scrollIntoView = scrollIntoView
+    fireEvent.focus(screen.getByLabelText('What would you like to learn about?'))
+
+    await act(async () => {
+      resolveHistory?.({
+        conversation: summary,
+        messages: [{
+          id: 'message-user', role: 'user', content: 'Question with focused input',
+          citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
+        }],
+      })
+      await pendingHistory
+    })
+
+    expect(await screen.findByText('Question with focused input')).toBeTruthy()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('does not let a stale history request replace the newly selected conversation', async () => {
+    const first = {
+      id: 'conversation-first',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:04.000Z',
+    }
+    const second = {
+      id: 'conversation-second',
+      created_at: '2026-10-30T12:00:00.000Z',
+      updated_at: '2026-10-30T12:00:04.000Z',
+    }
+    let resolveFirst: ((value: {
+      conversation: typeof first
+      messages: Awaited<ReturnType<typeof conversationsApi.get>>['messages']
+    }) => void) | undefined
+    const staleFirstRequest = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveFirst = resolve
+    })
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(conversationsApi.list).mockResolvedValue([first, second])
+    vi.mocked(conversationsApi.get).mockImplementation((id) =>
+      id === first.id
+        ? staleFirstRequest
+        : Promise.resolve({
+            conversation: second,
+            messages: [{
+              id: 'second-user', role: 'user', content: 'Second conversation question',
+              citations: [], limitations: [], created_at: '2026-10-30T12:00:01.000Z',
+            }],
+          }),
+    )
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /Conversation 1/u }))
+    expect(await screen.findByText('Second conversation question')).toBeTruthy()
+
+    await act(async () => {
+      resolveFirst?.({
+        conversation: first,
+        messages: [{
+          id: 'first-user', role: 'user', content: 'First conversation question',
+          citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
+        }],
+      })
+      await staleFirstRequest
+    })
+
+    expect(screen.getByText('Second conversation question')).toBeTruthy()
+    expect(screen.queryByText('First conversation question')).toBeNull()
+  })
+
+  it('does not show history from a previous user after an account change', async () => {
+    const summary = {
+      id: 'conversation-user-a',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:01.000Z',
+    }
+    let resolveHistory: ((value: Awaited<ReturnType<typeof conversationsApi.get>>) => void) | undefined
+    const pendingHistory = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveHistory = resolve
+    })
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(authApi.logout).mockResolvedValue()
+    vi.mocked(authApi.login).mockResolvedValue(otherUser)
+    vi.mocked(conversationsApi.list)
+      .mockResolvedValueOnce([summary])
+      .mockResolvedValueOnce([])
+    vi.mocked(conversationsApi.get).mockReturnValueOnce(pendingHistory)
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    await screen.findByRole('button', { name: user.email })
+    await waitFor(() => expect(conversationsApi.get).toHaveBeenCalledWith(summary.id))
+    fireEvent.click(screen.getByRole('button', { name: user.email }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: otherUser.email },
+    })
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'another-test-password' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in securely' }))
+    await screen.findByRole('button', { name: otherUser.email })
+
+    await act(async () => {
+      resolveHistory?.({
+        conversation: summary,
+        messages: [{
+          id: 'private-user-a', role: 'user', content: 'Private history from account A',
+          citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
+        }],
+      })
+      await pendingHistory
+    })
+
+    expect(screen.queryByText('Private history from account A')).toBeNull()
+    expect(screen.getByText('No saved conversations')).toBeTruthy()
+  })
+
   it('opens sign-in from navigation and shows the signed-in account state', async () => {
     vi.mocked(authApi.me).mockRejectedValue(
       new AuthApiError(401, 'UNAUTHORIZED', 'A valid session is required.'),
