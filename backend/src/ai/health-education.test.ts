@@ -174,30 +174,38 @@ describe("health education backend-to-AI integration", () => {
   });
 
   it("fails closed when the private URL or shared token is not configured", async () => {
+    // The backend's local .env is loaded by app.ts during tests. Clear these
+    // values so this test remains independent of a developer's local setup.
+    vi.stubEnv("AI_SERVICE_URL", "");
+    vi.stubEnv("AI_SERVICE_TOKEN", "");
     const fetchImplementation = vi.fn<typeof fetch>();
-    for (const client of [
-      new HealthEducationClient({ fetchImplementation }),
-      new HealthEducationClient({
-        serviceUrl: "http://ai.internal.example",
-        serviceToken: "test-internal-token",
-        fetchImplementation,
-      }),
-      new HealthEducationClient({
-        serviceUrl: "https://ai.internal.example",
-        serviceToken: "",
-        fetchImplementation,
-      }),
-    ]) {
-      const response = await request(createApp(client))
-        .post("/api/v1/health-education")
-        .send({ question: "What is malaria?" });
+    try {
+      for (const client of [
+        new HealthEducationClient({ fetchImplementation }),
+        new HealthEducationClient({
+          serviceUrl: "http://ai.internal.example",
+          serviceToken: "test-internal-token",
+          fetchImplementation,
+        }),
+        new HealthEducationClient({
+          serviceUrl: "https://ai.internal.example",
+          serviceToken: "",
+          fetchImplementation,
+        }),
+      ]) {
+        const response = await request(createApp(client))
+          .post("/api/v1/health-education")
+          .send({ question: "What is malaria?" });
 
-      expect(response.status).toBe(503);
-      expect(response.body.message).toBe(
-        "Health information is temporarily unavailable.",
-      );
+        expect(response.status).toBe(503);
+        expect(response.body.message).toBe(
+          "Health information is temporarily unavailable.",
+        );
+      }
+      expect(fetchImplementation).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
     }
-    expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
   it("does not allow insecure loopback URLs in production", async () => {
