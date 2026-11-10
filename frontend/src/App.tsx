@@ -219,6 +219,7 @@ function App() {
   const [historyError, setHistoryError] = useState('')
   const [historyOwnerId, setHistoryOwnerId] = useState<string | null>(null)
   const authenticatedUserIdRef = useRef<string | null>(null)
+  const historyRequestIdRef = useRef(0)
   const pendingMessageRef = useRef<{
     userId: string
     conversationId: string
@@ -241,6 +242,7 @@ function App() {
 
   useEffect(() => {
     let active = true
+    const historyRequestId = ++historyRequestIdRef.current
 
     if (status !== 'authenticated' || !user) {
       void Promise.resolve().then(() => {
@@ -259,10 +261,11 @@ function App() {
       }
     }
 
+    setHistoryLoading(true)
     void (async () => {
       try {
         const history = await conversationsApi.list()
-        if (!active) return
+        if (!active || historyRequestIdRef.current !== historyRequestId) return
         setHistoryOwnerId(user.id)
         setHistoryError('')
         setConversations(history)
@@ -270,12 +273,12 @@ function App() {
         setMessages([])
         if (history[0]) {
           const detail = await conversationsApi.get(history[0].id)
-          if (!active) return
+          if (!active || historyRequestIdRef.current !== historyRequestId) return
           setActiveConversationId(detail.conversation.id)
           setMessages(detail.messages)
         }
       } catch (error) {
-        if (!active) return
+        if (!active || historyRequestIdRef.current !== historyRequestId) return
         setHistoryOwnerId(user.id)
         setConversations([])
         setActiveConversationId(null)
@@ -286,7 +289,9 @@ function App() {
             : 'Conversation history could not be loaded.',
         )
       } finally {
-        if (active) setHistoryLoading(false)
+        if (active && historyRequestIdRef.current === historyRequestId) {
+          setHistoryLoading(false)
+        }
       }
     })()
 
@@ -308,23 +313,33 @@ function App() {
   async function selectConversation(id: string) {
     const requestUserId = authenticatedUserIdRef.current
     if (!requestUserId) return
+    const historyRequestId = ++historyRequestIdRef.current
 
     setHistoryLoading(true)
     setHistoryError('')
     try {
       const detail = await conversationsApi.get(id)
-      if (authenticatedUserIdRef.current !== requestUserId) return
+      if (
+        authenticatedUserIdRef.current !== requestUserId ||
+        historyRequestIdRef.current !== historyRequestId
+      ) return
       setActiveConversationId(detail.conversation.id)
       setMessages(detail.messages)
     } catch (error) {
-      if (authenticatedUserIdRef.current !== requestUserId) return
+      if (
+        authenticatedUserIdRef.current !== requestUserId ||
+        historyRequestIdRef.current !== historyRequestId
+      ) return
       setHistoryError(
         error instanceof Error
           ? error.message
           : 'Conversation history could not be loaded.',
       )
     } finally {
-      if (authenticatedUserIdRef.current === requestUserId) {
+      if (
+        authenticatedUserIdRef.current === requestUserId &&
+        historyRequestIdRef.current === historyRequestId
+      ) {
         setHistoryLoading(false)
       }
     }
