@@ -88,6 +88,68 @@ describe('credentialed conversation API', () => {
     })
   })
 
+  it('restores user and assistant messages in chronological order', async () => {
+    const messages = [
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'First question',
+        citations: [],
+        limitations: [],
+        created_at: '2026-10-31T12:00:01.000Z',
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'First answer',
+        citations: [],
+        limitations: [],
+        created_at: '2026-10-31T12:00:02.000Z',
+      },
+      {
+        id: 'user-2',
+        role: 'user',
+        content: 'Second question',
+        citations: [],
+        limitations: [],
+        created_at: '2026-10-31T12:00:03.000Z',
+      },
+      {
+        id: 'assistant-2',
+        role: 'assistant',
+        content: 'Second answer',
+        citations: [],
+        limitations: [],
+        created_at: '2026-10-31T12:00:04.000Z',
+      },
+    ]
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        status: 'ok',
+        conversation: {
+          id: 'conversation-1',
+          created_at: '2026-10-31T12:00:00.000Z',
+          updated_at: '2026-10-31T12:00:04.000Z',
+        },
+        messages,
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const detail = await conversationsApi.get('conversation-1')
+
+    expect(detail.messages).toEqual(messages)
+    expect(detail.messages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ])
+    expect(detail.messages.every((message) =>
+      message.citations.length === 0 && message.limitations.length === 0,
+    )).toBe(true)
+  })
+
   it('rejects non-HTTPS citation URLs in stored history', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({
