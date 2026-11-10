@@ -206,16 +206,18 @@ Safety-critical content requires appropriate clinical review before it is presen
 ## 15. Current Status
 
 The repository has backend Vitest tests, frontend Vitest tests, and AI-service
-Pytest tests. Opt-in PostgreSQL checks inspect the migrated schema and can
-exercise two-user RLS behavior. The account-deletion integration is separately
-guarded by `RUN_LOCAL_ACCOUNT_DELETION_INTEGRATION=true` and refuses
-non-loopback Supabase and database URLs. It creates a disposable local Auth
-user, verifies profile/conversation/message cascades and protected endpoint
-rejection, and cleans up fixture data. These tests do not test hosted
-production configuration.
+Pytest tests. Rate-limit unit tests cover 429 enforcement, Retry-After
+headers, safe response bodies, and the test-environment bypass. Opt-in
+PostgreSQL checks inspect the migrated schema and can exercise two-user RLS
+behavior. The account-deletion integration is separately guarded by
+`RUN_LOCAL_ACCOUNT_DELETION_INTEGRATION=true` and refuses non-loopback
+Supabase and database URLs. It creates a disposable local Auth user, verifies
+profile/conversation/message cascades and protected endpoint rejection, and
+cleans up fixture data. These tests do not test hosted production
+configuration.
 
 No measured retrieval/citation evaluation dataset, adversarial prompt-injection
-suite, provider integration, rate-limit test, full-stack deployed integration,
+suite, provider integration, full-stack deployed integration,
 backup restoration test, or clinically reviewed emergency evaluation is
 available. Passing software tests do not establish clinical safety or
 effectiveness. Run and report each test command separately; do not infer

@@ -92,8 +92,17 @@ Before any public release:
 
 - Select and configure production hosting, private service networking, HTTPS,
   CORS/Origin allowlists, secure cookies, secrets, and monitoring.
-- Implement and test API abuse protection/rate limits. No application-level
-  rate limiter is currently configured.
+- Implement and test API abuse protection/rate limits. Rate limiting is
+  implemented in `backend/src/security/rate-limit.ts` using
+  `express-rate-limit` v7 with an in-memory store. Credential endpoints
+  (register, login) are limited to 10 requests per 15 minutes per IP;
+  session endpoints (refresh, logout, me, account deletion) to 30 per 15
+  minutes; health-education to 20 per minute; conversation writes to 30 per
+  minute; and facility search to 60 per minute. The in-memory store is
+  per-process: a multi-instance deployment requires a shared Redis-backed
+  store and explicit `trust proxy` configuration. Do not set
+  `trust proxy` to `true` in production; configure it to the exact number
+  of trusted proxy hops.
 - Apply and verify migrations on a non-production project; re-run ownership
   and deletion tests with disposable users.
 - Complete backup retention, restore testing, and incident-response
