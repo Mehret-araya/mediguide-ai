@@ -127,6 +127,55 @@ describe('site authentication navigation', () => {
     },
   )
 
+  it('does not override a user scroll made while history is loading', async () => {
+    const summary = {
+      id: 'conversation-history',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:01.000Z',
+    }
+    let resolveHistory: ((value: Awaited<ReturnType<typeof conversationsApi.get>>) => void) | undefined
+    const pendingHistory = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveHistory = resolve
+    })
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(conversationsApi.list).mockResolvedValue([summary])
+    vi.mocked(conversationsApi.get).mockReturnValueOnce(pendingHistory)
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(conversationsApi.get).toHaveBeenCalledWith(summary.id))
+    const thread = document.querySelector<HTMLDivElement>('.conversation-thread')
+    expect(thread).not.toBeNull()
+    const scrollIntoView = vi.fn()
+    thread!.getBoundingClientRect = () => ({
+      x: 0, y: -3048, top: -3048, bottom: -2618,
+      left: 0, right: 375, width: 375, height: 430,
+      toJSON: () => ({}),
+    })
+    thread!.scrollIntoView = scrollIntoView
+
+    fireEvent.wheel(window)
+    await act(async () => {
+      resolveHistory?.({
+        conversation: summary,
+        messages: [{
+          id: 'message-user', role: 'user', content: 'Question after scrolling',
+          citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
+        }],
+      })
+      await pendingHistory
+    })
+
+    expect(await screen.findByText('Question after scrolling')).toBeTruthy()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
   it('does not let a stale history request replace the newly selected conversation', async () => {
     const first = {
       id: 'conversation-first',
