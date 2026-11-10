@@ -220,6 +220,7 @@ function App() {
   const [historyOwnerId, setHistoryOwnerId] = useState<string | null>(null)
   const authenticatedUserIdRef = useRef<string | null>(null)
   const historyRequestIdRef = useRef(0)
+  const userInteractedRef = useRef(false)
   const pendingMessageRef = useRef<{
     userId: string
     conversationId: string
@@ -239,6 +240,35 @@ function App() {
     }
     authenticatedUserIdRef.current = nextUserId
   }, [status, user?.id])
+
+  useEffect(() => {
+    const markUserInteraction = () => {
+      userInteractedRef.current = true
+    }
+    const markScrollKey = (event: KeyboardEvent) => {
+      if (
+        ['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' '].includes(
+          event.key,
+        )
+      ) {
+        markUserInteraction()
+      }
+    }
+
+    window.addEventListener('wheel', markUserInteraction, { passive: true })
+    window.addEventListener('touchstart', markUserInteraction, { passive: true })
+    window.addEventListener('pointerdown', markUserInteraction)
+    window.addEventListener('keydown', markScrollKey)
+    document.addEventListener('focusin', markUserInteraction)
+
+    return () => {
+      window.removeEventListener('wheel', markUserInteraction)
+      window.removeEventListener('touchstart', markUserInteraction)
+      window.removeEventListener('pointerdown', markUserInteraction)
+      window.removeEventListener('keydown', markScrollKey)
+      document.removeEventListener('focusin', markUserInteraction)
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -670,7 +700,11 @@ function App() {
               </div>
               {assistantNotice && <p className="inline-notice" role="status">{assistantNotice}</p>}
             </form>
-            <div className="conversation-thread" aria-live="polite" aria-busy={assistantLoading}>
+            <div
+              className="conversation-thread"
+              aria-live="polite"
+              aria-busy={assistantLoading}
+            >
               {historyPending && <p className="conversation-status">Loading your conversation…</p>}
               {visibleMessages.map((message) => (
                 <article className={`conversation-message conversation-message-${message.role}`} key={message.id}>
