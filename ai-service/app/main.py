@@ -1,7 +1,11 @@
+import os
 import secrets
 import ssl
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+
+if os.environ.get("DEBUG") not in {"true", "false", "1", "0", "True", "False", None}:
+    os.environ.pop("DEBUG", None)
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
