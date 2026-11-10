@@ -97,7 +97,11 @@ export function createApp(
   app.use(express.json({ limit: "10kb" }));
 
   app.use("/api/v1/education", educationRouter);
-  app.use("/api/v1/conversations", conversationWriteLimiter, createConversationsRouter());
+  app.use(
+    "/api/v1/conversations",
+    conversationWriteLimiter,
+    createConversationsRouter(healthEducationClient),
+  );
   app.use("/api/v1/facilities", facilitySearchLimiter, createFacilitiesRouter());
   app.use(
     "/api/v1/health-education",
