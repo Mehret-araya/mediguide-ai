@@ -157,6 +157,61 @@ describe('site authentication navigation', () => {
     expect(screen.queryByText('First conversation question')).toBeNull()
   })
 
+  it('does not show history from a previous user after an account change', async () => {
+    const summary = {
+      id: 'conversation-user-a',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:01.000Z',
+    }
+    let resolveHistory: ((value: Awaited<ReturnType<typeof conversationsApi.get>>) => void) | undefined
+    const pendingHistory = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveHistory = resolve
+    })
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(authApi.logout).mockResolvedValue()
+    vi.mocked(authApi.login).mockResolvedValue(otherUser)
+    vi.mocked(conversationsApi.list)
+      .mockResolvedValueOnce([summary])
+      .mockResolvedValueOnce([])
+    vi.mocked(conversationsApi.get).mockReturnValueOnce(pendingHistory)
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    await screen.findByRole('button', { name: user.email })
+    await waitFor(() => expect(conversationsApi.get).toHaveBeenCalledWith(summary.id))
+    fireEvent.click(screen.getByRole('button', { name: user.email }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: otherUser.email },
+    })
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'another-test-password' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in securely' }))
+    await screen.findByRole('button', { name: otherUser.email })
+
+    await act(async () => {
+      resolveHistory?.({
+        conversation: summary,
+        messages: [{
+          id: 'private-user-a', role: 'user', content: 'Private history from account A',
+          citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
+        }],
+      })
+      await pendingHistory
+    })
+
+    expect(screen.queryByText('Private history from account A')).toBeNull()
+    expect(screen.getByText('No saved conversations')).toBeTruthy()
+  })
+
   it('opens sign-in from navigation and shows the signed-in account state', async () => {
     vi.mocked(authApi.me).mockRejectedValue(
       new AuthApiError(401, 'UNAUTHORIZED', 'A valid session is required.'),
