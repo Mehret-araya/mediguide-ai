@@ -45,6 +45,118 @@ afterEach(() => {
 })
 
 describe('site authentication navigation', () => {
+  it('restores every user and assistant message for the first conversation', async () => {
+    const summary = {
+      id: 'conversation-history',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:04.000Z',
+    }
+    const messages = [
+      {
+        id: 'user-1', role: 'user' as const, content: 'First question',
+        citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
+      },
+      {
+        id: 'assistant-1', role: 'assistant' as const, content: 'First answer',
+        citations: [], limitations: [], created_at: '2026-10-31T12:00:02.000Z',
+      },
+      {
+        id: 'user-2', role: 'user' as const, content: 'Second question',
+        citations: [], limitations: [], created_at: '2026-10-31T12:00:03.000Z',
+      },
+      {
+        id: 'assistant-2', role: 'assistant' as const, content: 'Second answer',
+        citations: [], limitations: [], created_at: '2026-10-31T12:00:04.000Z',
+      },
+    ]
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(conversationsApi.list).mockResolvedValue([summary])
+    vi.mocked(conversationsApi.get).mockResolvedValue({
+      conversation: summary,
+      messages,
+    })
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    const firstQuestion = await screen.findByText('First question')
+    expect(screen.getByText('First answer')).toBeTruthy()
+    expect(screen.getByText('Second question')).toBeTruthy()
+    expect(screen.getByText('Second answer')).toBeTruthy()
+    const renderedMessages = firstQuestion.closest('.conversation-thread')
+      ?.querySelectorAll('article')
+    expect(Array.from(renderedMessages ?? []).map((message) =>
+      message.querySelector('p')?.textContent,
+    )).toEqual([
+      'First question',
+      'First answer',
+      'Second question',
+      'Second answer',
+    ])
+    expect(conversationsApi.get).toHaveBeenCalledWith('conversation-history')
+  })
+
+  it('does not let a stale history request replace the newly selected conversation', async () => {
+    const first = {
+      id: 'conversation-first',
+      created_at: '2026-10-31T12:00:00.000Z',
+      updated_at: '2026-10-31T12:00:04.000Z',
+    }
+    const second = {
+      id: 'conversation-second',
+      created_at: '2026-10-30T12:00:00.000Z',
+      updated_at: '2026-10-30T12:00:04.000Z',
+    }
+    let resolveFirst: ((value: {
+      conversation: typeof first
+      messages: Awaited<ReturnType<typeof conversationsApi.get>>['messages']
+    }) => void) | undefined
+    const staleFirstRequest = new Promise<
+      Awaited<ReturnType<typeof conversationsApi.get>>
+    >((resolve) => {
+      resolveFirst = resolve
+    })
+    vi.mocked(authApi.me).mockResolvedValue(user)
+    vi.mocked(conversationsApi.list).mockResolvedValue([first, second])
+    vi.mocked(conversationsApi.get).mockImplementation((id) =>
+      id === first.id
+        ? staleFirstRequest
+        : Promise.resolve({
+            conversation: second,
+            messages: [{
+              id: 'second-user', role: 'user', content: 'Second conversation question',
+              citations: [], limitations: [], created_at: '2026-10-30T12:00:01.000Z',
+            }],
+          }),
+    )
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /Conversation 1/u }))
+    expect(await screen.findByText('Second conversation question')).toBeTruthy()
+
+    await act(async () => {
+      resolveFirst?.({
+        conversation: first,
+        messages: [{
+          id: 'first-user', role: 'user', content: 'First conversation question',
+          citations: [], limitations: [], created_at: '2026-10-31T12:00:01.000Z',
+        }],
+      })
+      await staleFirstRequest
+    })
+
+    expect(screen.getByText('Second conversation question')).toBeTruthy()
+    expect(screen.queryByText('First conversation question')).toBeNull()
+  })
+
   it('opens sign-in from navigation and shows the signed-in account state', async () => {
     vi.mocked(authApi.me).mockRejectedValue(
       new AuthApiError(401, 'UNAUTHORIZED', 'A valid session is required.'),
