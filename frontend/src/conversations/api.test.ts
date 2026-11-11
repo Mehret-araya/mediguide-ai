@@ -88,6 +88,64 @@ describe('credentialed conversation API', () => {
     })
   })
 
+  it('preserves optional citation license and modification metadata', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        status: 'ok',
+        conversationId: 'conversation-1',
+        answer: 'Evidence-grounded information.',
+        citations: [{
+          sourceId: 'source-1',
+          title: 'Reviewed source',
+          publisher: 'Public health authority',
+          url: 'https://example.org/source',
+          licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+          modificationNotice: 'Modified by the source publisher.',
+        }],
+        limitations: [],
+        requestId: 'request-1',
+        messages: [],
+      }),
+    ))
+
+    await expect(conversationsApi.sendMessage(
+      'conversation-1',
+      'Question',
+      '10ec58c4-26b8-4efb-8501-2610e35b76f8',
+    )).resolves.toMatchObject({
+      citations: [{
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        modificationNotice: 'Modified by the source publisher.',
+      }],
+    })
+  })
+
+  it('rejects non-HTTPS citation license links', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        status: 'ok',
+        conversationId: 'conversation-1',
+        answer: 'Evidence-grounded information.',
+        citations: [{
+          sourceId: 'source-1',
+          title: 'Reviewed source',
+          publisher: 'Public health authority',
+          url: 'https://example.org/source',
+          licenseUrl: 'http://example.org/license',
+        }],
+        limitations: [],
+        requestId: 'request-1',
+        messages: [],
+      }),
+    ))
+
+    await expect(conversationsApi.sendMessage(
+      'conversation-1',
+      'Question',
+      '10ec58c4-26b8-4efb-8501-2610e35b76f8',
+    )).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  })
+
   it('restores user and assistant messages in chronological order', async () => {
     const messages = [
       {
