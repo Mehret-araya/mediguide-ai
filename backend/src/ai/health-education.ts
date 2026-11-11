@@ -11,6 +11,8 @@ export interface HealthEducationCitation {
   title: string;
   publisher: string;
   url: string;
+  licenseUrl?: string | null;
+  modificationNotice?: string | null;
   section?: string | null;
 }
 
@@ -108,6 +110,10 @@ export function parseHealthEducationResponse(
   const citations: HealthEducationCitation[] = [];
   for (const citation of value.citations) {
     const section = isRecord(citation) ? citation.section : undefined;
+    const licenseUrl = isRecord(citation) ? citation.licenseUrl : undefined;
+    const modificationNotice = isRecord(citation)
+      ? citation.modificationNotice
+      : undefined;
     if (
       !isRecord(citation) ||
       !isNonEmptyString(citation.sourceId) ||
@@ -133,11 +139,30 @@ export function parseHealthEducationResponse(
     ) {
       return null;
     }
+    if (
+      (licenseUrl !== undefined &&
+        licenseUrl !== null &&
+        typeof licenseUrl !== "string") ||
+      (modificationNotice !== undefined &&
+        modificationNotice !== null &&
+        !isNonEmptyString(modificationNotice))
+    ) {
+      return null;
+    }
+    if (typeof licenseUrl === "string") {
+      try {
+        if (new URL(licenseUrl).protocol !== "https:") return null;
+      } catch {
+        return null;
+      }
+    }
     citations.push({
       sourceId: citation.sourceId,
       title: citation.title,
       publisher: citation.publisher,
       url: citation.url,
+      ...(licenseUrl === undefined ? {} : { licenseUrl }),
+      ...(modificationNotice === undefined ? {} : { modificationNotice }),
       ...(section === undefined ? {} : { section }),
     });
   }
