@@ -765,6 +765,12 @@
   color: var(--muted);
 }
 
+.message-citations li .citation-license,
+.message-citations li .citation-modification {
+  display: block;
+  margin-top: 3px;
+}
+
 .conversation-message > .message-limitations {
   margin-top: 10px;
   color: #64748b;

@@ -131,6 +131,16 @@ class HealthAssistant:
                         title=citation.title,
                         publisher=citation.publisher,
                         url=_HTTP_URL_ADAPTER.validate_python(citation.url),
+                        licenseUrl=(
+                            _HTTP_URL_ADAPTER.validate_python(
+                                str(passage.chunk.source_metadata.license_url)
+                            )
+                            if passage.chunk.source_metadata.license_url is not None
+                            else None
+                        ),
+                        modificationNotice=(
+                            passage.chunk.source_metadata.modification_notice
+                        ),
                         section=citation.section or None,
                     ),
                 )

@@ -11,6 +11,8 @@ export interface HealthEducationCitation {
   title: string
   publisher: string
   url: string
+  licenseUrl?: string | null
+  modificationNotice?: string | null
   section?: string | null
 }
 
@@ -67,6 +69,10 @@ function parseConversation(value: unknown): ConversationSummary {
 }
 
 function parseCitation(value: unknown): HealthEducationCitation {
+  const licenseUrl = isRecord(value) ? value.licenseUrl : undefined
+  const modificationNotice = isRecord(value)
+    ? value.modificationNotice
+    : undefined
   if (
     !isRecord(value) ||
     typeof value.sourceId !== 'string' ||
@@ -96,7 +102,14 @@ function parseCitation(value: unknown): HealthEducationCitation {
     url.protocol !== 'https:' ||
     (value.section !== undefined &&
       value.section !== null &&
-      typeof value.section !== 'string')
+      typeof value.section !== 'string') ||
+    (licenseUrl !== undefined &&
+      licenseUrl !== null &&
+      typeof licenseUrl !== 'string') ||
+    (modificationNotice !== undefined &&
+      modificationNotice !== null &&
+      (typeof modificationNotice !== 'string' ||
+        modificationNotice.trim().length === 0))
   ) {
     throw new ConversationApiError(
       200,
@@ -105,11 +118,33 @@ function parseCitation(value: unknown): HealthEducationCitation {
     )
   }
 
+  if (typeof licenseUrl === 'string') {
+    let parsedLicenseUrl: URL
+    try {
+      parsedLicenseUrl = new URL(licenseUrl)
+    } catch {
+      throw new ConversationApiError(
+        200,
+        'INVALID_RESPONSE',
+        'Conversation history returned an invalid citation.',
+      )
+    }
+    if (parsedLicenseUrl.protocol !== 'https:') {
+      throw new ConversationApiError(
+        200,
+        'INVALID_RESPONSE',
+        'Conversation history returned an invalid citation.',
+      )
+    }
+  }
+
   return {
     sourceId: value.sourceId,
     title: value.title,
     publisher: value.publisher,
     url: value.url,
+    ...(licenseUrl === undefined ? {} : { licenseUrl }),
+    ...(modificationNotice === undefined ? {} : { modificationNotice }),
     ...(value.section === undefined ? {} : { section: value.section }),
   }
 }

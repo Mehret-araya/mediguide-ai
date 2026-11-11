@@ -18,6 +18,8 @@ function responseBody(requestId: string): HealthEducationResponse {
         title: "Verified source title",
         publisher: "Verified publisher",
         url: "https://health.example.org/source",
+        licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+        modificationNotice: "Modified by the source publisher.",
         section: "Overview",
       },
     ],
@@ -100,6 +102,20 @@ describe("health education backend-to-AI integration", () => {
     const body = responseBody("request-id");
     expect(parseHealthEducationResponse(body, "request-id")).toEqual(body);
     expect(parseHealthEducationResponse(body, "different-request")).toBeNull();
+    expect(parseHealthEducationResponse({
+      ...body,
+      citations: [{
+        ...body.citations[0],
+        licenseUrl: "http://untrusted.example/license",
+      }],
+    }, "request-id")).toBeNull();
+    expect(parseHealthEducationResponse({
+      ...body,
+      citations: [{
+        ...body.citations[0],
+        modificationNotice: " ",
+      }],
+    }, "request-id")).toBeNull();
     expect(
       parseHealthEducationResponse(
         {

@@ -16,6 +16,8 @@ export interface HealthSourceRecord {
   publisher: string;
   url: string;
   license: string;
+  licenseUrl?: string;
+  modificationNotice?: string;
 
   publicationDate?: string;
   updatedDate?: string;
@@ -127,6 +129,20 @@ export function validateSourceRecord(
 
   if (!hasValidHttpsUrl(record.url)) {
     errors.push("url must be a valid HTTPS URL.");
+  }
+
+  if (
+    record.licenseUrl !== undefined &&
+    !hasValidHttpsUrl(record.licenseUrl)
+  ) {
+    errors.push("licenseUrl must be a valid HTTPS URL.");
+  }
+
+  if (
+    record.modificationNotice !== undefined &&
+    !isNonEmptyString(record.modificationNotice)
+  ) {
+    errors.push("modificationNotice must be a non-empty string.");
   }
 
   if (!isValidDate(record.accessedDate)) {
