@@ -755,6 +755,16 @@ function App() {
                               {citation.title}
                             </a>
                             <span>{citation.publisher}{citation.section ? ` · ${citation.section}` : ''}</span>
+                            {citation.licenseUrl && (
+                              <a className="citation-license" href={citation.licenseUrl} target="_blank" rel="noreferrer">
+                                License terms
+                              </a>
+                            )}
+                            {citation.modificationNotice && (
+                              <span className="citation-modification">
+                                {citation.modificationNotice}
+                              </span>
+                            )}
                           </li>
                         ))}
                       </ul>

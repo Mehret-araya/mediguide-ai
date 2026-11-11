@@ -396,6 +396,8 @@ describe('site authentication navigation', () => {
         title: 'Reviewed source',
         publisher: 'Public health authority',
         url: 'https://example.org/source',
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        modificationNotice: 'Modified by the source publisher.',
       }],
       limitations: ['General information only.'],
       requestId: 'request-1',
@@ -417,6 +419,8 @@ describe('site authentication navigation', () => {
           title: 'Reviewed source',
           publisher: 'Public health authority',
           url: 'https://example.org/source',
+          licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+          modificationNotice: 'Modified by the source publisher.',
           }],
           limitations: ['General information only.'],
           created_at: '2026-10-31T12:00:02.000Z',
@@ -456,6 +460,9 @@ describe('site authentication navigation', () => {
 
     expect(await screen.findByText('Evidence-grounded information.')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Reviewed source' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'License terms' }).getAttribute('href'))
+      .toBe('https://creativecommons.org/licenses/by/4.0/')
+    expect(screen.getByText('Modified by the source publisher.')).toBeTruthy()
     expect(screen.getByText('Limitations: General information only.')).toBeTruthy()
     expect(conversationsApi.sendMessage).toHaveBeenCalledWith(
       'conversation-1',
