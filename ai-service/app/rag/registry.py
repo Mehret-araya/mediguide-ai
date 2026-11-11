@@ -25,6 +25,12 @@ class HealthSourceRecord(BaseModel):
     title: str = Field(min_length=1)
     publisher: str = Field(min_length=1)
     license: str = Field(min_length=1)
+    license_url: AnyHttpUrl | None = Field(default=None, alias="licenseUrl")
+    modification_notice: str | None = Field(
+        default=None,
+        alias="modificationNotice",
+        min_length=1,
+    )
     url: AnyHttpUrl
     publication_date: date | None = Field(default=None, alias="publicationDate")
     updated_date: date | None = Field(default=None, alias="updatedDate")
@@ -43,6 +49,16 @@ class HealthSourceRecord(BaseModel):
     def require_https(cls, value: AnyHttpUrl) -> AnyHttpUrl:
         if value.scheme != "https":
             raise ValueError("Source URL must use HTTPS.")
+        return value
+
+    @field_validator("license_url")
+    @classmethod
+    def require_https_license_url(
+        cls,
+        value: AnyHttpUrl | None,
+    ) -> AnyHttpUrl | None:
+        if value is not None and value.scheme != "https":
+            raise ValueError("License URL must use HTTPS.")
         return value
 
     @field_validator("topics", "limitations")

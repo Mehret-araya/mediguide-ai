@@ -18,6 +18,8 @@ def manifest_entry(
             "title": "Synthetic manifest fixture",
             "publisher": "Test publisher",
             "license": "Synthetic test fixture license",
+            "licenseUrl": "https://example.org/license",
+            "modificationNotice": "Synthetic fixture; modified for testing.",
             "url": "https://example.org/manifest-fixture",
             "accessedDate": "2026-10-17",
             "language": "en",
@@ -65,6 +67,10 @@ def test_manifest_loads_approved_local_text_and_preserves_source_data(
     assert chunks[0].citation.title == "Synthetic manifest fixture"
     assert chunks[0].approval_event.reason == "Synthetic test approval only."
     assert chunks[0].source_metadata.license == "Synthetic test fixture license"
+    assert str(chunks[0].source_metadata.license_url) == "https://example.org/license"
+    assert chunks[0].source_metadata.modification_notice == (
+        "Synthetic fixture; modified for testing."
+    )
     assert chunks[0].source_metadata.limitations == [
         "Synthetic fixture; not a medical source."
     ]
@@ -80,6 +86,18 @@ def test_manifest_rejects_unapproved_source_before_reading_document(
     )
 
     with pytest.raises(SourceNotApprovedError, match="not approved"):
+        load_approved_corpus(manifest_path)
+
+
+def test_manifest_rejects_non_https_license_link(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "approved-sources.json"
+    entry = manifest_entry()
+    source = entry["source"]
+    assert isinstance(source, dict)
+    source["licenseUrl"] = "http://example.org/license"
+    write_manifest(manifest_path, [entry])
+
+    with pytest.raises(ValueError, match="manifest is invalid"):
         load_approved_corpus(manifest_path)
 
 
