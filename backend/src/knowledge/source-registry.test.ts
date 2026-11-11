@@ -35,6 +35,25 @@ describe("Health source registry", () => {
     );
   });
 
+  it("accepts optional HTTPS license links and modification notices", () => {
+    expect(validateSourceRecord({
+      ...pendingSource,
+      licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+      modificationNotice: "Text adapted by the publisher.",
+    })).toEqual([]);
+  });
+
+  it("validates optional license attribution metadata", () => {
+    expect(validateSourceRecord({
+      ...pendingSource,
+      licenseUrl: "http://example.org/license",
+    })).toContain("licenseUrl must be a valid HTTPS URL.");
+    expect(validateSourceRecord({
+      ...pendingSource,
+      modificationNotice: " ",
+    })).toContain("modificationNotice must be a non-empty string.");
+  });
+
   it("requires explicit license metadata", () => {
     const source = { ...pendingSource, license: " " };
 
