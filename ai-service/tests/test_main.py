@@ -159,6 +159,8 @@ async def test_answer_uses_a_retrieved_passage_and_its_verified_metadata(
         "title": "Synthetic test document",
         "publisher": "Test publisher",
         "license": "Synthetic test fixture license",
+        "licenseUrl": "https://example.org/license",
+        "modificationNotice": "Synthetic fixture; modified for this test.",
         "url": "https://example.org/test",
         "accessedDate": "2026-10-17",
         "language": "en",
@@ -227,6 +229,8 @@ async def test_answer_uses_a_retrieved_passage_and_its_verified_metadata(
             "title": "Synthetic test document",
             "publisher": "Test publisher",
             "url": "https://example.org/test",
+            "licenseUrl": "https://example.org/license",
+            "modificationNotice": "Synthetic fixture; modified for this test.",
             "section": "Overview",
         }
     ]
