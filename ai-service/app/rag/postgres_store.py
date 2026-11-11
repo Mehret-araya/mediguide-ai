@@ -65,6 +65,12 @@ def _record_from_row(row: Mapping[str, Any]) -> DocumentChunk:
             "title": row["title"],
             "publisher": row["publisher"],
             "license": row["license"],
+            "licenseUrl": (
+                str(row.get("license_url"))
+                if row.get("license_url") is not None
+                else None
+            ),
+            "modificationNotice": row.get("modification_notice"),
             "url": row["source_url"],
             "publicationDate": _date(row["publication_date"]),
             "updatedDate": _date(row["updated_date"]),
@@ -192,6 +198,8 @@ class PostgresVectorStore(VectorStore):
                             approved.publisher,
                             approved.source_url,
                             approved.license,
+                            approved.license_url,
+                            approved.modification_notice,
                             approved.publication_date,
                             approved.updated_date,
                             approved.accessed_date,
@@ -236,6 +244,12 @@ class PostgresVectorStore(VectorStore):
                             "publisher": row["publisher"],
                             "url": row["source_url"],
                             "license": row["license"],
+                            "licenseUrl": (
+                                str(row.get("license_url"))
+                                if row.get("license_url") is not None
+                                else None
+                            ),
+                            "modificationNotice": row.get("modification_notice"),
                             "publicationDate": _date(row["publication_date"]),
                             "updatedDate": _date(row["updated_date"]),
                             "accessedDate": _date(row["accessed_date"]),
@@ -322,6 +336,8 @@ class PostgresVectorStore(VectorStore):
                     source.publisher,
                     source.source_url,
                     source.license,
+                    source.license_url,
+                    source.modification_notice,
                     source.publication_date,
                     source.updated_date,
                     source.accessed_date,

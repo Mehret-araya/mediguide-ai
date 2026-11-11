@@ -23,6 +23,8 @@ def approved_chunk():
         title="Synthetic source",
         publisher="Fixture publisher",
         license="Synthetic test fixture license",
+        licenseUrl="https://example.org/license",
+        modificationNotice="Synthetic fixture; modified for this test.",
         url="https://example.org/fixture",
         publicationDate="2025-01-01",
         updatedDate="2025-06-01",
@@ -56,6 +58,10 @@ def approved_source_row(chunk) -> dict[str, Any]:
         "publisher": source.publisher,
         "source_url": str(source.url),
         "license": source.license,
+        "license_url": (
+            str(source.license_url) if source.license_url is not None else None
+        ),
+        "modification_notice": source.modification_notice,
         "publication_date": source.publication_date,
         "updated_date": source.updated_date,
         "accessed_date": source.accessed_date,
@@ -154,6 +160,8 @@ async def test_pgvector_search_uses_approved_view_and_restores_citation_metadata
                 "publisher": chunk.source_metadata.publisher,
                 "source_url": str(chunk.source_metadata.url),
                 "license": chunk.source_metadata.license,
+                "license_url": str(chunk.source_metadata.license_url),
+                "modification_notice": chunk.source_metadata.modification_notice,
                 "publication_date": date(2025, 1, 1),
                 "updated_date": date(2025, 6, 1),
                 "accessed_date": date(2026, 10, 17),
@@ -184,6 +192,11 @@ async def test_pgvector_search_uses_approved_view_and_restores_citation_metadata
     assert len(matches) == 1
     assert matches[0].chunk.citation == chunk.citation
     assert matches[0].chunk.source_metadata.license == chunk.source_metadata.license
+    assert matches[0].chunk.source_metadata.license_url == chunk.source_metadata.license_url
+    assert (
+        matches[0].chunk.source_metadata.modification_notice
+        == chunk.source_metadata.modification_notice
+    )
     assert matches[0].chunk.document_checksum == chunk.document_checksum
     assert matches[0].chunk.approval_event.reason == "Test fixture approval."
     assert matches[0].score == 0.9
